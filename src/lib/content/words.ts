@@ -57,8 +57,58 @@ function makeWords(rows: Row[], partOfSpeech: Word['partOfSpeech'], chapter: str
       ...(uncertain ? { note: cropped ? 'Nederlandse kolom is afgesneden op de foto; controleer en vul aan.' : 'Controleer de vorm en betekenis met de foto of docent.' } : {}) };
   });
 }
-export const seedWords: Word[] = [
+// The original seed is retained exactly for identifying untouched v1 records during migration.
+export const legacySeedWords: Word[] = [
   ...makeWords(verbs, 'verb', '4.2 Werkwoorden'),
   ...makeWords(nouns, 'noun', '4.3 Zelfstandige naamwoorden'),
   ...makeWords(adjectives, 'adjective', '4.4 Bijvoeglijke naamwoorden')
 ];
+
+// These Dutch references are inferred from the other columns: the Dutch column
+// is cropped in the second noun photograph.
+const inferredDutch: Readonly<Record<string, string>> = {
+  'noun-baby': 'baby',
+  'noun-casino': 'casino',
+  'noun-banaan': 'banaan',
+  'noun-citroen': 'citroen',
+  'noun-sinaasappel': 'sinaasappel',
+  'noun-nummer': 'nummer',
+  'noun-piano': 'piano',
+  'noun-gitaar': 'gitaar',
+  'noun-viool': 'viool'
+};
+
+const sourceNotes: Readonly<Record<string, string>> = {
+  'noun-presentator': 'Het boek geeft bij presentator de vrouwelijke vormen Moderatorin, présentatrice en presentadora; presenter is niet geslachtsspecifiek.',
+  'noun-baby': 'Het boek schrijft Spaans “bebe” zonder accent; gebruikelijk voor baby is “bebé”.',
+  'adjective-snel': 'Frans “vite” staat zo in het boek en wordt doorgaans als bijwoord gebruikt.',
+  'adjective-saai': 'Frans “ennuyeuse” staat zo in het boek; dit is de vrouwelijke vorm van “ennuyeux”.',
+  'adjective-speciaal': 'Duits “besondere” staat zo in het boek; het is een verbogen vorm van “besonder”.',
+  'adjective-enthousiast': 'Engels en Duits “enthusiast” staan zo in het boek, maar zijn zelfstandige naamwoorden; de gebruikelijke bijvoeglijke naamwoorden zijn respectievelijk “enthusiastic” en “enthusiastisch”.'
+};
+
+export const seedWords: Word[] = legacySeedWords.map((word) => {
+  const inferred = inferredDutch[word.id];
+  const context = word.id === 'verb-zijn-ser' ? 'eigenschap of identiteit' : word.id === 'verb-zijn-estar' ? 'toestand of plaats' : word.context;
+  const notes = [
+    ...(inferred ? ['De Nederlandse kolom is afgesneden op de foto; deze Nederlandse vertaling is afgeleid uit de andere talen.'] : []),
+    ...(sourceNotes[word.id] ? [sourceNotes[word.id]] : [])
+  ];
+  // Reviewed means transcribed for practice, not that every printed form is endorsed.
+  const { note: _legacyNote, ...rest } = word;
+  return {
+    ...rest,
+    forms: {
+      ...word.forms,
+      ...(inferred ? { nl: inferred } : {}),
+      ...(word.id === 'adjective-intelligent' ? { en: 'Intelligent' } : {})
+    },
+    alternatives: { ...word.alternatives },
+    ...(context ? { context } : {}),
+    revision: inferred || word.id === 'adjective-intelligent' || context !== word.context ? word.revision + 1 : word.revision,
+    reviewed: true,
+    ...(notes.length ? { note: notes.join(' ') } : {})
+  };
+});
+
+export const MVT_WORD_IDS: ReadonlySet<string> = new Set(seedWords.map((word) => word.id));

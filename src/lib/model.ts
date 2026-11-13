@@ -1,5 +1,7 @@
 export type Language = 'nl' | 'de' | 'fr' | 'es' | 'en';
 export type TargetLanguage = Exclude<Language, 'nl'>;
+export type PracticeLanguage = TargetLanguage | 'mvt';
+export const MATCH_PAIRS = 6;
 
 export interface Word {
   id: string;
@@ -13,7 +15,7 @@ export interface Word {
   enabled: boolean;
   note?: string;
 }
-export interface Settings { language: TargetLanguage; chapter: string; timezone: string }
+export interface Settings { language: PracticeLanguage; chapter: string; timezone: string }
 export interface Progress {
   key: string; wordId: string; language: TargetLanguage; mode: 'match' | 'recall';
   revision: number; stage: number; dueAt: number; lastPracticedAt: number;
@@ -29,10 +31,11 @@ export interface Board { left: string[]; right: string[]; matched: string[]; fai
 export interface Session {
   id: string; version: number; settings: Settings; phase: 'intro' | 'match' | 'recall' | 'results';
   words: Word[]; newWordIds: string[]; boards: Board[]; boardIndex: number; recallWordIds: string[];
+  wordLanguages: Record<string, TargetLanguage>;
   recallIndex: number; completedPairs: number; startedAt: number; correct: number; mistakes: number;
   hints: number; selection: { side: 'left' | 'right'; wordId: string } | null; feedback: string;
 }
 export interface Snapshot {
-  schemaVersion: 1; words: Word[]; progress: Record<string, Progress>; exposures: Exposure[];
+  schemaVersion: 2; words: Word[]; progress: Record<string, Progress>; exposures: Exposure[];
   settings: Settings; session: Session | null;
 }

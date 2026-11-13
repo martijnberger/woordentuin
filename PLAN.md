@@ -1,6 +1,6 @@
 # Word Matcher — research and implementation plan
 
-Prepared by an AI assistant. Planning only; no application has been implemented or device-tested.
+Prepared by an AI assistant. The SvelteKit application and MVT book mode are implemented; this document retains the research and design rationale. Production-browser checks have run, but physical iPhone/iPad validation remains outstanding. See README.md for current usage, content caveats, and verification.
 
 ## 1. Recommendation
 
@@ -11,9 +11,9 @@ Build a small, mobile-first SvelteKit game for practising your son's actual scho
 Recommended starting scope:
 
 - Svelte + SvelteKit + TypeScript; ordinary HTML buttons and CSS, not a canvas/game engine.
-- Dutch interface and Dutch as the starting language, inferred from the supplied schoolwork; configurable target language.
+- Dutch interface and Dutch as the reference language; MVT mixes the four foreign languages, with individual-language practice also available.
 - One child profile on one primary device, no account required.
-- German, French, Spanish, and English decks where the supplied material actually contains those translations.
+- The exact photographed book set: 55 Dutch entries and 210 German, French, Spanish, and English forms. Do not invent missing English verb translations.
 - iPhone/iPad browser support, plus optional Add to Home Screen installation and offline practice after an initial successful load.
 - Local progress, parent-managed vocabulary, and export/import backups.
 
@@ -21,7 +21,7 @@ Recommended starting scope:
 
 ## 2. Existing material and content risks
 
-The project currently contains four textbook photographs, not an existing app. They show verbs, nouns (across two photos), and adjectives, with Dutch and several foreign-language columns. These are a better starting point than a generic vocabulary catalogue.
+The project started with four textbook photographs. They show verbs, nouns (across two photos), and adjectives, with Dutch and several foreign-language columns. The implemented MVT mode uses these rather than a generic vocabulary catalogue.
 
 Create reviewed decks from these photos, grouped by chapter, word type, and language pair. Do not build OCR infrastructure for four photos: transcribe once, check carefully, then offer a simple editor and tab-separated paste for subsequent lists.
 
@@ -65,8 +65,8 @@ A small study with 18 university students found that productive retrieval practi
 ### Child flow
 
 1. Home: one prominent “Oefenen” button, selected language/deck, and a small explanation of today's practice.
-2. Brief introduction of at most two unfamiliar words: show each translation before testing it.
-3. Match four pairs in two independently shuffled columns. Use fewer pairs on constrained layouts or for small decks.
+2. Brief introduction of at most six unfamiliar translations: show each before testing it. This supplies six choices even in the first round.
+3. Match six pairs in two independently shuffled columns, as requested by the parent. Keep six on narrow screens with readable, touch-friendly tiles; use fewer only for small or ambiguous selections.
 4. Continue through roughly three short boards. Target a comfortable 2–4 minute session, not a hard deadline.
 5. Offer two or three recall prompts, preferably words that need a stronger check. Child says/thinks the answer, reveals it, then chooses “I knew it” or “Practise again.” Skipping is not a failure.
 6. Finish with a positive summary and an optional “one more round.” No automatic endless session.
@@ -108,11 +108,11 @@ A mismatch is evidence about the **first selected word's attempted match**, not 
 Select only from the chosen language/deck and reviewed content:
 
 1. Due and overdue words first, with recent errors/hints prioritised and oldest-due breaking ties.
-2. Fill remaining places with up to two new words per session.
+2. Fill remaining places with up to six new translations per session.
 3. Use already familiar words as supporting pairs when needed; practising them early does not postpone their actual due date.
 4. If everything is current, say so and offer optional practice rather than inventing an overdue workload.
 
-Reserve most of the session for needed review when there is a backlog; introduce no new words when review already fills it. This avoids both endless failure drills and easy-word farming.
+Reserve most of the session for needed review when there is a backlog. Single-language mode introduces no new words when due work fills the session; MVT reserves up to six of eighteen matching-pair slots for new language exposures, so a backlog in one language does not completely exclude the others. Keep progress keyed by actual target language, never by “MVT”.
 
 ### Scheduling defaults
 
@@ -243,8 +243,8 @@ Acceptance:
 
 These do not block planning; the recommended defaults are explicit:
 
-1. **Age/reading comfort:** start with four pairs and generous text; tune after observing him.
-2. **First school language/chapter:** provide selection from the photographed material rather than guessing one target language.
+1. **Age/reading comfort:** six pairs requested by the parent; retain generous tap targets and tune after observing him.
+2. **School language/chapter:** MVT is the fresh-install default and mixes the photographed languages against Dutch. Chapter and individual-language selection remain available.
 3. **School expectation:** meaning recognition is covered; spoken recall is sampled. If written spelling is assessed, include typed recall and its language-specific answer policy before calling the learning scope complete.
 4. **Device use:** recommend one primary device and backups. Choose cloud sync if uninterrupted shared progress across iPhone/iPad is required.
 

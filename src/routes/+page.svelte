@@ -1,22 +1,24 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { LANGUAGES, eligibleWords, progressKey } from '#lib/learning/index.ts';
+  import { resolve } from '$app/paths';
+  import { PRACTICE_MODES, eligibleWords, progressKey, targetLanguages } from '#lib/learning/index.ts';
   import { loadSnapshot, saveSettings } from '#lib/storage/index.ts';
-  import type { Snapshot, TargetLanguage } from '#lib/model.ts';
+  import type { Snapshot, PracticeLanguage } from '#lib/model.ts';
 
   let snapshot = $state<Snapshot | null>(null);
   let error = $state('');
   let busy = $state(false);
-  let language = $state<TargetLanguage>('de');
+  let language = $state<PracticeLanguage>('mvt');
   let chapter = $state('all');
   let chapters = $derived(snapshot ? [...new Set(snapshot.words.map((word) => word.chapter))].sort((a, b) => a.localeCompare(b, 'nl')) : []);
   let eligible = $derived(snapshot ? eligibleWords(snapshot.words, { ...snapshot.settings, language, chapter }) : []);
-  let due = $derived(snapshot ? eligible.filter((word) => {
-    const item = snapshot!.progress[progressKey(word.id, language, 'match')];
+  let pairs = $derived(eligible.flatMap((word) => targetLanguages(word, { ...snapshot!.settings, language, chapter }).map((target) => ({ word, target }))));
+  let due = $derived(snapshot ? pairs.filter(({ word, target }) => {
+    const item = snapshot!.progress[progressKey(word.id, target, 'match')];
     return item && item.revision === word.revision && item.dueAt <= Date.now();
   }).length : 0);
-  let newCount = $derived(snapshot ? eligible.filter((word) => {
-    const item = snapshot!.progress[progressKey(word.id, language, 'match')];
+  let newCount = $derived(snapshot ? pairs.filter(({ word, target }) => {
+    const item = snapshot!.progress[progressKey(word.id, target, 'match')];
     return !item || item.revision !== word.revision;
   }).length : 0);
   let active = $derived(snapshot?.session && snapshot.session.phase !== 'results' ? snapshot.session : null);
@@ -48,7 +50,7 @@
 
 <svelte:head><title>Woordentuin — samen woorden laten groeien</title><meta name="description" content="Oefen je schoolwoorden op je eigen tempo." /></svelte:head>
 <div class="shell home-shell">
-  <header class="site-header"><a class="brand" href="/" aria-label="Woordentuin, naar start"><span class="brand-mark" aria-hidden="true">✳</span><span>woordentuin</span></a><a class="quiet-link" href="/parent/">Voor ouders <span aria-hidden="true">↗</span></a></header>
+  <header class="site-header"><a class="brand" href={resolve('/')} aria-label="Woordentuin, naar start"><span class="brand-mark" aria-hidden="true">✳</span><span>woordentuin</span></a><a class="quiet-link" href={resolve('parent/')}>Voor ouders <span aria-hidden="true">↗</span></a></header>
   <main class="home-main">
     <section class="hero">
       <div class="hero-copy"><p class="eyebrow"><span class="eyebrow-dot"></span> EEN BEETJE OEFENEN, ELKE KEER WEER</p><h1>Woorden groeien <em>met je mee.</em></h1><p class="hero-text">Ontdek, verbind en onthoud je schoolwoorden. Helemaal op jouw tempo.</p></div>
@@ -58,10 +60,11 @@
     {#if snapshot}
       <section class="setup-card" aria-labelledby="setup-heading">
         <div class="section-heading"><div><p class="eyebrow">JOUW OEFENPLEK</p><h2 id="setup-heading">Klaar om te groeien?</h2></div><span class="step-badge" aria-hidden="true">01</span></div>
-        {#if active}<div class="resume-note"><strong>Je ronde staat voor je klaar.</strong><span>Ga verder met {LANGUAGES[active.settings.language]}{active.settings.chapter !== 'all' ? ` · ${active.settings.chapter}` : ''}.</span></div>{/if}
-        <div class="field-grid"><label>Taal<select bind:value={language} onchange={changeSettings} disabled={busy || !!active}>{#each Object.entries(LANGUAGES) as [code, label]}<option value={code}>{label}</option>{/each}</select></label><label>Hoofdstuk<select bind:value={chapter} onchange={changeSettings} disabled={busy || !!active}><option value="all">Alle hoofdstukken</option>{#each chapters as name}<option value={name}>{name}</option>{/each}</select></label></div>
-        {#if active}<p class="muted small">Maak je ronde eerst af om iets anders te kiezen.</p>{:else if eligible.length === 0}<p class="muted">Er zijn nog geen gecontroleerde woorden voor deze keuze. Vraag een ouder om woorden toe te voegen of te controleren.</p>{:else}<p class="practice-note"><span aria-hidden="true">✦</span> {#if due > 0}{due} {due === 1 ? 'woord' : 'woorden'} klaar om te herhalen.{:else if newCount > 0}Tijd om nieuwe woorden te ontdekken.{:else}Alles is bijgewerkt. Je mag natuurlijk extra oefenen.{/if}</p>{/if}
-        <a class:disabled={busy || (!active && eligible.length === 0)} aria-disabled={busy || (!active && eligible.length === 0)} tabindex={busy || (!active && eligible.length === 0) ? -1 : undefined} class="button primary wide" href="/play/">{active ? 'Verder oefenen' : 'Oefenen'} <span aria-hidden="true">→</span></a>
+        {#if active}<div class="resume-note"><strong>Je ronde staat voor je klaar.</strong><span>Ga verder met {PRACTICE_MODES[active.settings.language]}{active.settings.chapter !== 'all' ? ` · ${active.settings.chapter}` : ''}.</span></div>{/if}
+        <div class="field-grid"><label>Taal<select bind:value={language} onchange={changeSettings} disabled={busy || !!active}>{#each Object.entries(PRACTICE_MODES) as [code, label]}<option value={code}>{label}</option>{/each}</select></label><label>Hoofdstuk<select bind:value={chapter} onchange={changeSettings} disabled={busy || !!active}><option value="all">Alle hoofdstukken</option>{#each chapters as name}<option value={name}>{name}</option>{/each}</select></label></div>
+        {#if language === 'mvt'}<p class="muted small">MVT oefent de woorden uit het boek met Nederlands als basis en Engels, Frans, Duits en Spaans door elkaar. Per woord verschilt de beschikbare vertaling.</p>{/if}
+        {#if active}<p class="muted small">Maak je ronde eerst af om iets anders te kiezen.</p>{:else if eligible.length === 0}<p class="muted">Er zijn nog geen gecontroleerde woorden voor deze keuze. Vraag een ouder om woorden toe te voegen of te controleren.</p>{:else}<p class="practice-note"><span aria-hidden="true">✦</span> {#if due > 0}{due} {due === 1 ? 'woordenpaar' : 'woordenparen'} klaar om te herhalen.{:else if newCount > 0}Tijd om nieuwe woorden te ontdekken.{:else}Alles is bijgewerkt. Je mag natuurlijk extra oefenen.{/if}</p>{/if}
+        <a class:disabled={busy || (!active && eligible.length === 0)} aria-disabled={busy || (!active && eligible.length === 0)} tabindex={busy || (!active && eligible.length === 0) ? -1 : undefined} class="button primary wide" href={resolve('play/')}>{active ? 'Verder oefenen' : 'Oefenen'} <span aria-hidden="true">→</span></a>
         <p class="privacy-note">Je voortgang wordt op dit apparaat bewaard.</p>
       </section>
     {:else if !error}<p class="loading" role="status">Je woordentuin wordt geopend…</p>{/if}

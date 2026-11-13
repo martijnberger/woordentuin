@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Exposure, Progress, Settings, Word } from '../model';
+import { seedWords } from '../content/words';
 import { applyExposure, createSession, eligibleWords, progressKey, transition } from './index';
 
 const settings: Settings = { language: 'de', chapter: 'all', timezone: 'Europe/Amsterdam' };
@@ -42,12 +43,14 @@ describe('spacing evidence', () => {
   });
 });
 describe('sessions', () => {
-  it('handles empty and tiny decks and never introduces more than two', () => {
+  it('handles empty and tiny decks and starts a new learner with six pairs', () => {
     expect(createSession([], {}, settings, at, () => 0).phase).toBe('results');
     const s = createSession([word('a')], {}, settings, at, () => 0);
     expect(s.phase).toBe('intro'); expect(s.newWordIds).toEqual(['a']);
     expect(s.boards.every((b) => b.left.length === 1)).toBe(true);
-    expect(createSession(Array.from({ length: 8 }, (_, i) => word(String(i))), {}, settings, at, () => 0).newWordIds).toHaveLength(2);
+    const fresh = createSession(Array.from({ length: 8 }, (_, i) => word(String(i))), {}, settings, at, () => 0);
+    expect(fresh.newWordIds).toHaveLength(6);
+    expect(fresh.boards.every((board) => board.left.length === 6 && board.right.length === 6)).toBe(true);
   });
   it('filters unreviewed and missing translations and avoids alternate collisions', () => {
     const a = word('a'), b = word('b'), c = word('c');
@@ -58,8 +61,8 @@ describe('sessions', () => {
     expect(s.boards.every((board) => board.left.length === 1)).toBe(true);
   });
   it('prioritizes due words, does not mutate inputs and keeps selection transient', () => {
-    const ws = Array.from({ length: 14 }, (_, i) => word(String(i)));
-    const progress = Object.fromEntries(ws.slice(0, 12).map((w) => [progressKey(w.id, 'de', 'match'), practiced(w)]));
+    const ws = Array.from({ length: 20 }, (_, i) => word(String(i)));
+    const progress = Object.fromEntries(ws.slice(0, 18).map((w) => [progressKey(w.id, 'de', 'match'), practiced(w)]));
     const s = createSession(ws, progress, settings, at, () => 0);
     expect(s.newWordIds).toEqual([]); expect(s.phase).toBe('match');
     const id = s.boards[0].left[0];
@@ -68,9 +71,9 @@ describe('sessions', () => {
     expect(transition(selected, { type: 'select', side: 'left', wordId: id }, at).session.selection).toBeNull();
   });
   it('includes overdue recall independently of recognition boards without introducing extra words', () => {
-    const ws = Array.from({ length: 13 }, (_, i) => word(String(i)));
+    const ws = Array.from({ length: 19 }, (_, i) => word(String(i)));
     const progress = Object.fromEntries(ws.map((w) => [progressKey(w.id, 'de', 'match'), practiced(w)]));
-    const target = ws[12];
+    const target = ws[18];
     progress[progressKey(target.id, 'de', 'match')] = { ...practiced(target, at + 30 * DAY), stage: 4 };
     progress[progressKey(target.id, 'de', 'recall')] = { ...practiced(target, at - DAY), key: progressKey(target.id, 'de', 'recall'), mode: 'recall', lastFailedDay: '2025-12-31' };
     const s = createSession(ws, progress, settings, at, () => 0);
@@ -79,19 +82,18 @@ describe('sessions', () => {
     expect(s.words.some((w) => w.id === target.id)).toBe(true);
     expect(s.newWordIds).toHaveLength(0);
   });
-  it('removes a premature natural repeat if a later board allows three other completions', () => {
-    const ws = Array.from({ length: 4 }, (_, i) => word(String(i)));
+  it('keeps six choices on later boards when low-choice answers need another attempt', () => {
+    const ws = Array.from({ length: 6 }, (_, i) => word(String(i)));
     const progress = Object.fromEntries(ws.map((w) => [progressKey(w.id, 'de', 'match'), practiced(w)]));
     let s = createSession(ws, progress, settings, at, () => 0);
-    const ids = [...s.boards[0].left], target = ids[0];
-    for (const id of ids.slice(1, 3)) {
+    const ids = [...s.boards[0].left];
+    for (const id of ids) {
       s = transition(s, { type: 'select', side: 'left', wordId: id }).session;
       s = transition(s, { type: 'select', side: 'right', wordId: id }, at).session;
     }
-    s = transition(s, { type: 'select', side: 'left', wordId: target }).session;
-    s = transition(s, { type: 'select', side: 'right', wordId: ids[3] }, at).session;
-    expect(s.boards[1].left).not.toContain(target);
-    expect(s.boards[2].left).toContain(target);
+    s = transition(s, { type: 'next-board' }).session;
+    expect(s.boardIndex).toBe(1);
+    expect(s.boards.slice(1).every((board) => new Set(board.left).size === 6 && new Set(board.right).size === 6)).toBe(true);
   });
   it('attributes a miss only to the anchor and correction remains weak from either side', () => {
     const ws = Array.from({ length: 4 }, (_, i) => word(String(i)));
@@ -151,5 +153,35 @@ describe('sessions', () => {
     expect(recalled.exposures[0]).toMatchObject({ mode: 'recall', outcome: 'correct' });
     expect(recalled.session.phase).toBe('results');
     expect(transition(s, { type: 'skip-recall' }).exposures).toEqual([]);
+  });
+  it('balances new MVT pairs across all four languages and keeps outsider words out', () => {
+    const mixed: Settings = { ...settings, language: 'mvt' };
+    const s = createSession([...seedWords, word('outside')], {}, mixed, at, () => 0.5);
+    expect(s.newWordIds).toHaveLength(6);
+    expect(s.boards.every((board) => board.left.length === 6 && board.right.length === 6)).toBe(true);
+    expect(new Set(s.boards[0].left.map((id) => s.wordLanguages[id]))).toEqual(new Set(['en', 'fr', 'de', 'es']));
+    expect(s.words.some((item) => item.id === 'outside')).toBe(false);
+    expect(Object.keys(s.wordLanguages).sort()).toEqual(s.words.map((item) => item.id).sort());
+  });
+  it('attributes mixed-language errors, hints and recalls to the anchored word language', () => {
+    let s = createSession(seedWords, {}, { ...settings, language: 'mvt' }, at, () => 0.5);
+    s = transition(s, { type: 'begin' }).session;
+    const [a, b] = s.boards[0].left;
+    s = transition(s, { type: 'select', side: 'right', wordId: a }).session;
+    const missed = transition(s, { type: 'select', side: 'left', wordId: b }, at);
+    expect(missed.exposures[0]).toMatchObject({ wordId: a, chosenWordId: b, language: s.wordLanguages[a], outcome: 'incorrect' });
+    const hint = transition(missed.session, { type: 'hint' }, at);
+    expect(hint.exposures[0]).toMatchObject({ wordId: a, language: s.wordLanguages[a], outcome: 'hint' });
+    const recall = transition({ ...s, phase: 'recall', recallWordIds: [b], recallIndex: 0 }, { type: 'recall', known: true }, at);
+    expect(recall.exposures[0]).toMatchObject({ wordId: b, language: s.wordLanguages[b], mode: 'recall' });
+  });
+  it('avoids cross-language display collisions and still introduces new languages alongside due pairs', () => {
+    const originals = seedWords.filter((item) => item.forms.en && item.forms.de && item.forms.fr && item.forms.es).slice(0, 14);
+    const ws = originals.map((item, index) => ({ ...item, forms: { nl: `woord-${index}`, en: index < 2 ? 'shared' : `en-${index}`, fr: index < 2 ? 'shared' : `fr-${index}`, de: index < 2 ? 'shared' : `de-${index}`, es: index < 2 ? 'shared' : `es-${index}` } }));
+    const progress = Object.fromEntries(ws.slice(0, 10).map((item) => [progressKey(item.id, 'de', 'match'), practiced(item)]));
+    const s = createSession(ws, progress, { ...settings, language: 'mvt' }, at, () => 0.5);
+    expect(s.newWordIds.length).toBeGreaterThan(0);
+    expect(s.newWordIds.length).toBeLessThanOrEqual(6);
+    expect(s.boards.every((board) => !(board.left.includes(ws[0].id) && board.left.includes(ws[1].id)))).toBe(true);
   });
 });

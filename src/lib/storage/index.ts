@@ -1,7 +1,8 @@
 import { openDB, type DBSchema } from 'idb';
 import type { Board, Exposure, Language, Progress, Session, Settings, Snapshot, TargetLanguage, Word } from '../model';
-import { applyExposure, progressKey } from '../learning';
-import { seedWords } from '../content/words';
+import { MATCH_PAIRS } from '../model';
+import { applyExposure, progressKey, targetLanguages } from '../learning';
+import { legacySeedWords, seedWords } from '../content/words';
 
 interface Store extends DBSchema { state: { key: string; value: Snapshot } }
 const DB_NAME = 'woordentuin';
@@ -17,7 +18,7 @@ const strings = (value: unknown): value is string[] => Array.isArray(value) && v
 const oneOf = (value: unknown, values: readonly string[]): boolean => typeof value === 'string' && values.includes(value);
 
 function validSettings(value: unknown): value is Settings {
-  if (!object(value) || !oneOf(value.language, targets) || !text(value.chapter) || !text(value.timezone)) return false;
+  if (!object(value) || !oneOf(value.language, [...targets, 'mvt']) || !text(value.chapter) || !text(value.timezone)) return false;
   try { new Intl.DateTimeFormat('nl', { timeZone: value.timezone }); return true; } catch { return false; }
 }
 function validWord(value: unknown): value is Word {
@@ -33,18 +34,21 @@ function validProgress(value: unknown): value is Progress {
   return ['dueAt', 'lastPracticedAt', 'successes', 'mistakes', 'hints'].every((key) => integer(value[key])) && ['lastPromotedDay', 'lastFailedDay'].every((key) => value[key] === null || (typeof value[key] === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value[key] as string)));
 }
 function validExposure(value: unknown): value is Exposure {
-  return object(value) && text(value.id) && text(value.sessionId) && text(value.wordId) && (value.chosenWordId === undefined || text(value.chosenWordId)) && oneOf(value.language, targets) && oneOf(value.mode, ['match', 'recall']) && oneOf(value.outcome, ['correct', 'incorrect', 'hint']) && integer(value.choicesRemaining) && value.choicesRemaining <= 4 && integer(value.at) && integer(value.revision) && value.revision > 0;
+  return object(value) && text(value.id) && text(value.sessionId) && text(value.wordId) && (value.chosenWordId === undefined || text(value.chosenWordId)) && oneOf(value.language, targets) && oneOf(value.mode, ['match', 'recall']) && oneOf(value.outcome, ['correct', 'incorrect', 'hint']) && integer(value.choicesRemaining) && value.choicesRemaining <= MATCH_PAIRS && integer(value.at) && integer(value.revision) && value.revision > 0;
 }
 function validBoard(value: unknown, ids: Set<string>): value is Board {
   if (!object(value) || !['left', 'right', 'matched', 'failed', 'hinted'].every((key) => strings(value[key]) && (value[key] as string[]).every((id) => ids.has(id)))) return false;
   const board = value as unknown as Board;
-  return board.left.length > 0 && board.left.length <= 4 && board.left.length === board.right.length && board.left.every((id) => board.right.includes(id)) && [...board.matched, ...board.failed, ...board.hinted].every((id) => board.left.includes(id));
+  return board.left.length > 0 && board.left.length <= MATCH_PAIRS && board.left.length === board.right.length && board.left.every((id) => board.right.includes(id)) && [...board.matched, ...board.failed, ...board.hinted].every((id) => board.left.includes(id));
 }
 function validSession(value: unknown): value is Session {
   if (!object(value) || !text(value.id) || !integer(value.version) || !validSettings(value.settings) || !oneOf(value.phase, ['intro', 'match', 'recall', 'results']) || !Array.isArray(value.words) || !value.words.every(validWord)) return false;
   const settings = value.settings;
-  if (!value.words.every((word: Word) => word.enabled && word.reviewed && text(word.forms.nl) && text(word.forms[settings.language]))) return false;
   const ids = new Set(value.words.map((word: Word) => word.id));
+  if (!object(value.wordLanguages) || Object.keys(value.wordLanguages).length !== ids.size || !value.words.every((word: Word) => {
+    const language = (value.wordLanguages as Record<string, unknown>)[word.id];
+    return Object.hasOwn(value.wordLanguages as object, word.id) && word.enabled && word.reviewed && text(word.forms.nl) && oneOf(language, targets) && targetLanguages(word, settings).includes(language as TargetLanguage);
+  })) return false;
   if (ids.size !== value.words.length || !Array.isArray(value.boards) || value.boards.length > 3 || !value.boards.every((board) => validBoard(board, ids)) || !strings(value.newWordIds) || !strings(value.recallWordIds) || ![...value.newWordIds, ...value.recallWordIds].every((id) => ids.has(id))) return false;
   if (!['boardIndex', 'recallIndex', 'completedPairs', 'startedAt', 'correct', 'mistakes', 'hints'].every((key) => integer(value[key])) || (value.boardIndex as number) > value.boards.length || (value.recallIndex as number) > value.recallWordIds.length || typeof value.feedback !== 'string') return false;
   if ((value.phase === 'intro' || value.phase === 'match') && (value.boardIndex as number) >= value.boards.length) return false;
@@ -52,7 +56,7 @@ function validSession(value: unknown): value is Session {
   return value.selection === null || (object(value.selection) && oneOf(value.selection.side, ['left', 'right']) && text(value.selection.wordId) && ids.has(value.selection.wordId));
 }
 function validateSnapshot(value: unknown): asserts value is Snapshot {
-  if (!object(value) || value.schemaVersion !== 1 || !Array.isArray(value.words) || !value.words.every(validWord) || !object(value.progress) || !Array.isArray(value.exposures) || !value.exposures.every(validExposure) || !validSettings(value.settings) || !(value.session === null || validSession(value.session))) invalid();
+  if (!object(value) || value.schemaVersion !== 2 || !Array.isArray(value.words) || !value.words.every(validWord) || !object(value.progress) || !Array.isArray(value.exposures) || !value.exposures.every(validExposure) || !validSettings(value.settings) || !(value.session === null || validSession(value.session))) invalid();
   const snapshot = value as unknown as Snapshot;
   const words = new Map(snapshot.words.map((word) => [word.id, word]));
   if (words.size !== snapshot.words.length || new Set(snapshot.exposures.map((event) => event.id)).size !== snapshot.exposures.length) invalid();
@@ -63,25 +67,66 @@ function validateSnapshot(value: unknown): asserts value is Snapshot {
   }
   for (const event of snapshot.exposures) {
     const word = words.get(event.wordId);
-    if (!word || word.revision !== event.revision || !word.forms[event.language] || (event.chosenWordId && !words.has(event.chosenWordId))) invalid();
+    if (!word || word.revision !== event.revision || !word.forms[event.language] || (event.chosenWordId && !words.has(event.chosenWordId)) || (snapshot.session?.id === event.sessionId && snapshot.session.wordLanguages[event.wordId] !== event.language)) invalid();
   }
   if (snapshot.session && snapshot.session.words.some((word) => {
     const current = words.get(word.id);
     return !current || current.revision !== word.revision || material(current) !== material(word);
   })) invalid();
 }
+function sameValue(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) || Array.isArray(b)) return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((value, index) => sameValue(value, b[index]));
+  if (object(a) && object(b)) {
+    const keys = Object.keys(a);
+    return keys.length === Object.keys(b).length && keys.every((key) => Object.hasOwn(b, key) && sameValue(a[key], b[key]));
+  }
+  return a === b;
+}
+function normalizeSnapshot(value: unknown): Snapshot {
+  if (!object(value)) return invalid();
+  if (value.schemaVersion === 2) { validateSnapshot(value); return value; }
+  if (value.schemaVersion !== 1 || !object(value.settings) || !oneOf(value.settings.language, targets)) return invalid();
+  let session = value.session;
+  if (session !== null) {
+    if (!object(session) || !object(session.settings) || !oneOf(session.settings.language, targets) || !Array.isArray(session.words)) return invalid();
+    const language = session.settings.language;
+    session = { ...session, wordLanguages: Object.fromEntries(session.words.map((word: unknown) => {
+      if (!object(word) || !text(word.id)) return invalid();
+      return [word.id, language];
+    })) };
+  }
+  const migrated: unknown = { ...value, schemaVersion: 2, session };
+  validateSnapshot(migrated);
+  const legacy = new Map(legacySeedWords.map((word) => [word.id, word]));
+  const current = new Map(seedWords.map((word) => [word.id, word]));
+  const changed = new Set<string>();
+  const words = migrated.words.map((word) => {
+    const old = legacy.get(word.id), replacement = current.get(word.id);
+    if (!old || !replacement || !sameValue(word, old)) return word;
+    const revised = material(word) !== material(replacement);
+    if (revised) changed.add(word.id);
+    return { ...structuredClone(replacement), revision: revised ? Math.max(word.revision + 1, replacement.revision) : word.revision };
+  });
+  const result: Snapshot = {
+    ...migrated, words,
+    progress: Object.fromEntries(Object.entries(migrated.progress).filter(([, progress]) => !changed.has(progress.wordId))),
+    exposures: migrated.exposures.filter((event) => !changed.has(event.wordId)),
+    session: migrated.session?.words.some((word) => changed.has(word.id)) ? null : migrated.session
+  };
+  validateSnapshot(result);
+  return result;
+}
 function db() { return openDB<Store>(DB_NAME, 1, { upgrade(database) { database.createObjectStore('state'); } }); }
 function initial(): Snapshot {
   let timezone = 'Europe/Amsterdam';
   try { timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || timezone; } catch { /* use fallback */ }
-  return { schemaVersion: 1, words: structuredClone(seedWords), progress: {}, exposures: [], settings: { language: 'de', chapter: 'all', timezone }, session: null };
+  return { schemaVersion: 2, words: structuredClone(seedWords), progress: {}, exposures: [], settings: { language: 'mvt', chapter: 'all', timezone }, session: null };
 }
 async function mutate(fn: (snapshot: Snapshot) => Snapshot): Promise<Snapshot> {
   const database = await db();
   const tx = database.transaction('state', 'readwrite');
   try {
-    const current = await tx.store.get('snapshot') ?? initial();
-    validateSnapshot(current);
+    const current = normalizeSnapshot(await tx.store.get('snapshot') ?? initial());
     const result = fn(current);
     validateSnapshot(result);
     await tx.store.put(result, 'snapshot');
@@ -120,7 +165,7 @@ export async function saveSession(session: Session, exposures: Exposure[] = []):
     const progress = { ...s.progress };
     const events = [...s.exposures];
     for (const event of exposures) {
-      if (!validExposure(event) || event.sessionId !== session.id || event.language !== session.settings.language || !session.words.some((word) => word.id === event.wordId && word.revision === event.revision) || (event.chosenWordId && !session.words.some((word) => word.id === event.chosenWordId))) invalid();
+      if (!validExposure(event) || event.sessionId !== session.id || event.language !== session.wordLanguages[event.wordId] || !session.words.some((word) => word.id === event.wordId && word.revision === event.revision) || (event.chosenWordId && !session.words.some((word) => word.id === event.chosenWordId))) invalid();
       const existing = known.get(event.id);
       if (existing) { if (JSON.stringify(existing) !== JSON.stringify(event)) invalid(); continue; }
       const key = progressKey(event.wordId, event.language, event.mode);
@@ -153,9 +198,7 @@ export async function exportBackup(): Promise<string> { return JSON.stringify(aw
 export async function importBackup(json: string): Promise<Snapshot> {
   let data: unknown;
   try { data = JSON.parse(json); } catch { return invalid(); }
-  validateSnapshot(data);
-  const snapshot = data as Snapshot;
-  if (snapshot.session) snapshot.session.selection = null;
+  const snapshot = normalizeSnapshot(data);
   return exclusive(() => mutate(() => snapshot));
 }
 export async function resetProgress(): Promise<Snapshot> { return exclusive(() => mutate((s) => ({ ...s, progress: {}, exposures: [], session: null }))); }
