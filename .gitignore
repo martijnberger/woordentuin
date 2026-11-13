@@ -1,0 +1,12 @@
+node_modules/
+.svelte-kit/
+build/
+coverage/
+.DS_Store
+.env
+.env.*
+!.env.example
+
+input
+intput/
+/woordentuin.Caddyfile

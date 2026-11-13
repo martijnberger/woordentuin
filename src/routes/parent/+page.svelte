@@ -1,0 +1,144 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import type { Language, Snapshot, TargetLanguage, Word } from '#lib/model.ts';
+  import { LANGUAGES, progressKey } from '#lib/learning/index.ts';
+  import { exportBackup, importBackup, loadSnapshot, resetProgress, saveSettings, saveWords } from '#lib/storage/index.ts';
+
+  let snapshot: Snapshot | null = null;
+  let error = '';
+  let notice = '';
+  let busy = false;
+  let language: TargetLanguage = 'de';
+  let chapter = 'all';
+  let editId: string | null = null;
+  let draft: Word | null = null;
+  let newDutch = '';
+  let newTarget = '';
+  let newChapter = '';
+  let pasted = '';
+  let backupFile: HTMLInputElement;
+  const languageKeys: TargetLanguage[] = ['de', 'fr', 'es', 'en'];
+  const normalize = (value: string) => value.trim().replace(/\s+/g, ' ');
+  const compare = (value: string) => normalize(value).toLocaleLowerCase();
+  const makeId = () => crypto.randomUUID();
+  $: chapters = snapshot ? [...new Set(snapshot.words.map((word) => word.chapter))].sort((a, b) => a.localeCompare(b, 'nl')) : [];
+  $: visible = snapshot ? snapshot.words.filter((word) => chapter === 'all' || word.chapter === chapter) : [];
+  $: weakWords = snapshot ? visible.filter((word) => { const p = snapshot!.progress[progressKey(word.id, language, 'match')]; return p && ((p.stage === 0 && (p.mistakes > 0 || p.hints > 0)) || p.dueAt <= Date.now()); }).sort((a, b) => (snapshot!.progress[progressKey(a.id, language, 'match')]?.dueAt ?? 0) - (snapshot!.progress[progressKey(b.id, language, 'match')]?.dueAt ?? 0)) : [];
+  $: preview = makePreview(pasted, snapshot?.words ?? [], language);
+
+  function makePreview(input: string, words: Word[], target: TargetLanguage) {
+    const rows = input.split(/\r?\n/).map((line, index) => ({ line, number: index + 1 })).filter(({ line }) => line.trim()).map(({ line, number }) => {
+      const columns = line.split('\t');
+      const nl = normalize(columns[0] ?? '');
+      const translation = normalize(columns[1] ?? '');
+      const issues: string[] = [];
+      if (columns.length !== 2 || !nl || !translation) issues.push('Gebruik twee gevulde kolommen, gescheiden door een tab.');
+      return { line: number, nl, translation, issues };
+    });
+    for (const row of rows) {
+      if (!row.nl || !row.translation) continue;
+      const candidates = [
+        ...words.map((word) => ({ nl: word.forms.nl ?? '', translation: word.forms[target] ?? '', nlAlternatives: word.alternatives?.nl ?? [], targetAlternatives: word.alternatives?.[target] ?? [] })),
+        ...rows.filter((other) => other !== row).map((other) => ({ ...other, nlAlternatives: [] as string[], targetAlternatives: [] as string[] }))
+      ];
+      if (candidates.some((other) => compare(other.nl) === compare(row.nl) && compare(other.translation) === compare(row.translation))) row.issues.push('Dit woordenpaar bestaat al.');
+      else if (candidates.some((other) => {
+        if (!other.nl || !other.translation) return false;
+        const matches = (value: string, form: string, alternatives: string[]) => [form, ...alternatives, ...form.split(/,|\//)].some((part) => compare(part) === compare(value));
+        return matches(row.nl, other.nl, other.nlAlternatives) || matches(row.translation, other.translation, other.targetAlternatives);
+      })) row.issues.push('Dubbelzinnige vertaling; controleer dit paar.');
+    }
+    return rows;
+  }
+  async function perform(work: () => Promise<void>) {
+    busy = true; error = ''; notice = '';
+    try { await work(); } catch (cause) { error = cause instanceof Error ? cause.message : 'Er ging iets mis. Probeer het opnieuw.'; }
+    finally { busy = false; }
+  }
+  onMount(() => { void perform(async () => { snapshot = await loadSnapshot(); language = snapshot.settings.language; chapter = snapshot.settings.chapter; }); });
+  async function updateSettings() {
+    if (!snapshot) return;
+    const previous = snapshot.settings;
+    await perform(async () => { try { await saveSettings({ ...previous, language, chapter }); snapshot = await loadSnapshot(); notice = 'Keuze opgeslagen op dit apparaat.'; } catch (cause) { language = previous.language; chapter = previous.chapter; throw cause; } });
+  }
+  function edit(word: Word) { editId = word.id; draft = structuredClone(word); }
+  async function commitDraft() {
+    if (!snapshot || !draft) return;
+    const word = structuredClone(draft);
+    word.chapter = normalize(word.chapter);
+    const old = snapshot.words.find((item) => item.id === word.id)!;
+    for (const key of Object.keys(word.forms) as Language[]) {
+      const value = normalize(word.forms[key] ?? '');
+      if (value) word.forms[key] = value; else delete word.forms[key];
+      if (value !== (old.forms[key] ?? '')) {
+        if (!word.alternatives) word.alternatives = {};
+        const parts = value.split(/,\s*|\//).map(normalize).filter(Boolean);
+        if (parts.length > 1) word.alternatives[key] = [...new Set(parts)];
+        else delete word.alternatives[key];
+      }
+    }
+    await perform(async () => { snapshot = await saveWords(snapshot!.words.map((item) => item.id === word.id ? word : item)); editId = null; draft = null; notice = 'Woord opgeslagen.'; });
+  }
+  async function toggle(word: Word, field: 'enabled' | 'reviewed') {
+    if (!snapshot) return;
+    await perform(async () => { snapshot = await saveWords(snapshot!.words.map((item) => item.id === word.id ? { ...item, [field]: !item[field] } : item)); notice = 'Wijziging opgeslagen.'; });
+  }
+  async function addPairs(pairs: { nl: string; translation: string }[]) {
+    if (!snapshot) return;
+    const targetChapter = normalize(newChapter || (chapter === 'all' ? '' : chapter));
+    if (!targetChapter) { error = 'Vul eerst een hoofdstuk in.'; return; }
+    const rows = pairs.map((pair) => `${pair.nl}\t${pair.translation}`).join('\n');
+    const result = makePreview(rows, snapshot.words, language);
+    if (!result.length || result.some((row) => row.issues.length)) { error = result.flatMap((row) => row.issues).join(' ') || 'Vul beide woorden in.'; return; }
+    const added: Word[] = result.map((row) => ({ id: makeId(), chapter: targetChapter, partOfSpeech: 'other', forms: { nl: row.nl, [language]: row.translation }, revision: 1, reviewed: false, enabled: true }));
+    await perform(async () => { snapshot = await saveWords([...snapshot!.words, ...added]); newDutch = ''; newTarget = ''; pasted = ''; notice = `${added.length} ${added.length === 1 ? 'woordenpaar' : 'woordenparen'} toegevoegd. Controleer en markeer als nagekeken voordat je ermee speelt.`; });
+  }
+  async function download() {
+    await perform(async () => { const json = await exportBackup(); const url = URL.createObjectURL(new Blob([json], { type: 'application/json' })); const link = document.createElement('a'); link.href = url; link.download = 'woordentuin-backup.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); notice = 'Reservekopie gedownload.'; });
+  }
+  async function restore(event: Event) {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    if (!confirm('Deze reservekopie vervangt alle woorden, voortgang en de huidige sessie op dit apparaat. Doorgaan?')) { input.value = ''; return; }
+    await perform(async () => { snapshot = await importBackup(await file.text()); language = snapshot.settings.language; chapter = snapshot.settings.chapter; editId = null; draft = null; notice = 'Reservekopie teruggezet.'; });
+    input.value = '';
+  }
+  async function reset() {
+    if (!confirm('Alle oefenvoortgang en de huidige sessie op dit apparaat wissen? Je woorden blijven bewaard.')) return;
+    await perform(async () => { snapshot = await resetProgress(); notice = 'De voortgang is gewist.'; });
+  }
+  function status(word: Word): string {
+    const p = snapshot?.progress[progressKey(word.id, language, 'match')];
+    if (!p) return 'Nieuw';
+    if (p.dueAt <= Date.now() || (p.stage === 0 && (p.mistakes || p.hints))) return 'Heeft oefening nodig';
+    return p.stage > 0 ? 'Herkend over dagen' : 'In oefening';
+  }
+</script>
+
+<svelte:head><title>Voor ouders · Woordentuin</title><meta name="description" content="Beheer woorden en bekijk de voortgang op dit apparaat." /></svelte:head>
+<div class="parent-page">
+  <header class="top"><a class="back" href="/">← Terug naar de tuin</a><span>Woordentuin · voor ouders</span></header>
+  <main>
+    <div class="intro"><p class="eyebrow">Een kijkje achter de schermen</p><h1>De woorden groeien mee.</h1><p>Beheer de woorden en bekijk wat extra aandacht kan gebruiken. Alles blijft op dit apparaat; een andere browser of installatie heeft eigen gegevens.</p></div>
+    {#if error}<div class="message error" role="alert">{error}</div>{/if}
+    {#if notice}<div class="message" role="status">{notice}</div>{/if}
+    {#if snapshot}
+      <section class="panel filters" aria-labelledby="filter-title"><div><p class="eyebrow">Samen kiezen</p><h2 id="filter-title">Taal en hoofdstuk</h2><p>Deze keuze geldt ook voor het spelen.</p></div><div class="filter-fields"><label>Taal<select bind:value={language} on:change={updateSettings} disabled={busy}>{#each languageKeys as key}<option value={key}>{LANGUAGES[key]}</option>{/each}</select></label><label>Hoofdstuk<select bind:value={chapter} on:change={updateSettings} disabled={busy}><option value="all">Alle hoofdstukken</option>{#each chapters as item}<option value={item}>{item}</option>{/each}</select></label></div></section>
+      <section class="panel" aria-labelledby="attention-title"><div class="heading"><div><p class="eyebrow">Oefenen helpt</p><h2 id="attention-title">Woorden om nog eens te bekijken</h2></div><span class="count">{weakWords.length}</span></div><p>Herkenning: woorden met fouten, hulp of een geplande herhaling. Dit is geen cijfer.</p>{#if weakWords.length}<ul class="weak-list">{#each weakWords as word}<li><strong>{word.forms.nl}</strong><span>{word.forms[language]}</span><small>{status(word)} · {snapshot.progress[progressKey(word.id, language, 'match')].mistakes} fout · {snapshot.progress[progressKey(word.id, language, 'match')].hints}× hulp</small></li>{/each}</ul>{:else}<p class="empty">Nog geen woorden die extra aandacht vragen voor deze keuze.</p>{/if}</section>
+      <section class="panel" aria-labelledby="words-title"><div class="heading"><div><p class="eyebrow">De woordenlijst</p><h2 id="words-title">Woorden beheren</h2></div><span class="count">{visible.length}</span></div><p>Alleen actieve én nagekeken woorden komen in een spel. Nieuwe woorden moet je zelf nakijken.</p>
+        {#each visible as word (word.id)}<article class="word-row">
+          {#if editId === word.id && draft}<div class="edit-form"><label>Hoofdstuk<input bind:value={draft.chapter} /></label><label>Nederlands<input bind:value={draft.forms.nl} /></label>{#each languageKeys as key}<label>{LANGUAGES[key]}<input value={draft.forms[key] ?? ''} on:input={(event) => { if (draft) draft.forms[key] = event.currentTarget.value; }} /></label>{/each}<label>Woordsoort<select bind:value={draft.partOfSpeech}><option value="other">Overig</option><option value="noun">Zelfstandig naamwoord</option><option value="verb">Werkwoord</option><option value="adjective">Bijvoeglijk naamwoord</option></select></label><label>Context<input bind:value={draft.context} /></label><label>Notitie<input bind:value={draft.note} /></label><div class="actions"><button class="primary" on:click={commitDraft} disabled={busy}>Bewaren</button><button on:click={() => { editId = null; draft = null; }}>Annuleren</button></div></div>
+          {:else}<div class="word-main"><div><strong>{word.forms.nl || 'Nederlands ontbreekt'}</strong><span class="translation">{word.forms[language] || 'Vertaling ontbreekt'}</span><small>{word.chapter} · {status(word)}</small></div><div class="word-actions"><button on:click={() => edit(word)} disabled={busy}>Bewerken</button><button aria-pressed={word.enabled} on:click={() => toggle(word, 'enabled')} disabled={busy}>{word.enabled ? 'Actief' : 'Inactief'}</button><button aria-pressed={word.reviewed} on:click={() => toggle(word, 'reviewed')} disabled={busy}>{word.reviewed ? 'Nagekeken' : 'Nog nakijken'}</button></div></div>{/if}
+          <p class="recall">Zelf herinneren (zelf gemeld, geen toets): {#if snapshot.progress[progressKey(word.id, language, 'recall')]}{snapshot.progress[progressKey(word.id, language, 'recall')].successes}× geweten · {snapshot.progress[progressKey(word.id, language, 'recall')].mistakes}× nog oefenen{:else}nog niet geoefend{/if}</p>
+        </article>{:else}<p class="empty">Geen woorden voor deze taal en dit hoofdstuk.</p>{/each}
+      </section>
+      <section class="panel" aria-labelledby="add-title"><p class="eyebrow">Een eigen lijst</p><h2 id="add-title">Woorden toevoegen</h2><p>Kies hierboven de doeltaal. Voeg een paar toe of plak twee kolommen uit een spreadsheet: Nederlands en daarna de vertaling, met een tab ertussen.</p><label>Hoofdstuk voor nieuwe woorden<input bind:value={newChapter} placeholder={chapter === 'all' ? 'Bijvoorbeeld hoofdstuk 1' : chapter} /></label><div class="pair-fields"><label>Nederlands<input bind:value={newDutch} /></label><label>{LANGUAGES[language]}<input bind:value={newTarget} /></label></div><button class="primary" disabled={busy} on:click={() => addPairs([{ nl: newDutch, translation: newTarget }])}>Woordenpaar toevoegen</button><div class="import"><label>Plak je lijst<textarea bind:value={pasted} rows="5" placeholder={'huis\tHaus\nboom\tBaum'}></textarea></label>{#if preview.length}<h3>Voorbeeld · {preview.length} regels</h3><ul class="preview">{#each preview as row}<li><strong>Regel {row.line}:</strong> {row.nl || 'ontbreekt'} → {row.translation || 'ontbreekt'}{#each row.issues as issue}<span class="issue">{issue}</span>{/each}</li>{/each}</ul><button class="primary" disabled={busy || preview.some((row) => row.issues.length > 0)} on:click={() => addPairs(preview)}>Lijst toevoegen</button>{/if}</div></section>
+      <section class="panel backup" aria-labelledby="backup-title"><p class="eyebrow">Goed om te bewaren</p><h2 id="backup-title">Reservekopie &amp; voortgang</h2><p>Bewaar af en toe een reservekopie buiten deze browser. Terugzetten vervangt de gegevens op dit apparaat. Oefenvoortgang wissen laat je woorden staan.</p><div class="actions"><button on:click={download} disabled={busy}>Reservekopie downloaden</button><button on:click={() => backupFile.click()} disabled={busy}>Reservekopie terugzetten</button><input class="file" bind:this={backupFile} type="file" accept="application/json,.json" on:change={restore} /><button class="danger" on:click={reset} disabled={busy}>Voortgang wissen</button></div></section>
+    {:else if !error}<p>Gegevens laden…</p>{/if}
+  </main>
+</div>
+
+<style>
+  .parent-page{min-height:100vh;padding:1.25rem max(1.1rem,env(safe-area-inset-left)) 5rem;color:#253b30;background:#f7f4ea;font-family:system-ui,sans-serif}.top,main{max-width:960px;margin:auto}.top{display:flex;justify-content:space-between;gap:1rem;align-items:center;font-size:.82rem;color:#617269}.back{color:#315d43;font-weight:700}.intro{max-width:700px;padding:3.5rem 0 2rem}.eyebrow{font-size:.72rem!important;letter-spacing:.14em;text-transform:uppercase;font-weight:800;color:#6b806a;margin:0 0 .65rem}h1,h2,h3{font-family:Georgia,serif;line-height:1.12;margin:0;color:#203d2f}h1{font-size:clamp(2.8rem,7vw,5rem);letter-spacing:-.04em}h2{font-size:clamp(1.6rem,3vw,2.2rem)}h3{font-size:1.25rem}p{line-height:1.55;color:#53675a}.panel{background:#fffefa;border:1px solid #dfe7d9;border-radius:24px;padding:clamp(1.25rem,3vw,2rem);margin-bottom:1rem;box-shadow:0 5px 20px #29433109}.filters{background:#e9f0e3;display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap}.filter-fields,.pair-fields,.actions,.word-actions{display:flex;gap:.6rem;flex-wrap:wrap}.filter-fields label,.pair-fields label{flex:1;min-width:140px}.heading{display:flex;justify-content:space-between;align-items:center;gap:1rem}.count{background:#edf2e7;border-radius:50%;min-width:2.5rem;height:2.5rem;display:grid;place-items:center;font-weight:700}.weak-list,.preview{list-style:none;margin:1rem 0;padding:0}.weak-list li{display:grid;grid-template-columns:1fr 1fr;gap:.3rem;padding:.8rem 0;border-top:1px solid #e6ebe2}.weak-list small{grid-column:1/-1;color:#6b7d70}.empty{padding:1rem;background:#f5f7f0;border-radius:12px}.word-row{padding:1rem 0;border-top:1px solid #e6ebe2}.word-main{display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap}.word-main strong,.translation,.word-main small{display:block}.word-main strong{font-size:1.1rem}.translation{margin:.2rem 0;color:#526b59}.word-main small{color:#738477}.recall{font-size:.85rem;color:#716585;margin:.75rem 0 0}.word-actions button[aria-pressed=true]{background:#e5f0df;color:#28553a;border-color:#bdd5bb}.edit-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.8rem}.edit-form .actions{grid-column:1/-1}label{display:block;font-weight:700;font-size:.85rem;color:#3c5645;margin:.4rem 0}input,select,textarea{box-sizing:border-box;display:block;width:100%;margin-top:.4rem;padding:.75rem;border:1px solid #b8c9b9;border-radius:10px;background:#fff;color:#243c2f;font:inherit;min-height:48px}textarea{resize:vertical}button{font:inherit;font-weight:700;min-height:44px;padding:.65rem 1rem;border:1px solid #c5d4c5;background:#fffefa;border-radius:10px;color:#315b40;cursor:pointer}button.primary{background:#315f40;color:white;border-color:#315f40}button.danger{color:#974a3a;border-color:#dfbcb1}button:disabled{opacity:.5;cursor:not-allowed}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #a18ad0;outline-offset:2px}.import{margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e6ebe2}.preview li{padding:.55rem 0;border-bottom:1px solid #e6ebe2}.issue{display:block;color:#a04936;font-size:.88rem}.message{padding:1rem;border-radius:12px;background:#e1efdf;color:#245338;margin-bottom:1rem}.message.error{background:#fbe8df;color:#813a2c}.file{display:none}.backup{background:#f3edf7}@media(max-width:560px){.top span{display:none}.intro{padding-top:2rem}.word-actions button{font-size:.8rem;padding:.55rem}.weak-list li{grid-template-columns:1fr 1fr}}
+</style>
