@@ -58,11 +58,12 @@
     </section>
     {#if error}<div class="notice error" role="alert">{error}</div>{/if}
     {#if snapshot}
+      {#if snapshot.notice}<div class="notice" role="status">{snapshot.notice}</div>{/if}
       <section class="setup-card" aria-labelledby="setup-heading">
         <div class="section-heading"><div><p class="eyebrow">JOUW OEFENPLEK</p><h2 id="setup-heading">Klaar om te groeien?</h2></div><span class="step-badge" aria-hidden="true">01</span></div>
         {#if active}<div class="resume-note"><strong>Je ronde staat voor je klaar.</strong><span>Ga verder met {PRACTICE_MODES[active.settings.language]}{active.settings.chapter !== 'all' ? ` · ${active.settings.chapter}` : ''}.</span></div>{/if}
         <div class="field-grid"><label>Taal<select bind:value={language} onchange={changeSettings} disabled={busy || !!active}>{#each Object.entries(PRACTICE_MODES) as [code, label]}<option value={code}>{label}</option>{/each}</select></label><label>Hoofdstuk<select bind:value={chapter} onchange={changeSettings} disabled={busy || !!active}><option value="all">Alle hoofdstukken</option>{#each chapters as name}<option value={name}>{name}</option>{/each}</select></label></div>
-        {#if language === 'mvt'}<p class="muted small">MVT oefent de woorden uit het boek met Nederlands als basis en Engels, Frans, Duits en Spaans door elkaar. Per woord verschilt de beschikbare vertaling.</p>{/if}
+        {#if language === 'mvt'}<p class="muted small">MVT oefent de woorden uit het boek met Nederlands als basis en Frans, Duits en Spaans door elkaar. Engels kun je apart oefenen. Per woord verschilt de beschikbare vertaling.</p>{/if}
         {#if active}<p class="muted small">Maak je ronde eerst af om iets anders te kiezen.</p>{:else if eligible.length === 0}<p class="muted">Er zijn nog geen gecontroleerde woorden voor deze keuze. Vraag een ouder om woorden toe te voegen of te controleren.</p>{:else}<p class="practice-note"><span aria-hidden="true">✦</span> {#if due > 0}{due} {due === 1 ? 'woordenpaar' : 'woordenparen'} klaar om te herhalen.{:else if newCount > 0}Tijd om nieuwe woorden te ontdekken.{:else}Alles is bijgewerkt. Je mag natuurlijk extra oefenen.{/if}</p>{/if}
         <a class:disabled={busy || (!active && eligible.length === 0)} aria-disabled={busy || (!active && eligible.length === 0)} tabindex={busy || (!active && eligible.length === 0) ? -1 : undefined} class="button primary wide" href={resolve('play/')}>{active ? 'Verder oefenen' : 'Oefenen'} <span aria-hidden="true">→</span></a>
         <p class="privacy-note">Je voortgang wordt op dit apparaat bewaard.</p>

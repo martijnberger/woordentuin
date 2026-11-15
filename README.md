@@ -1,20 +1,32 @@
 # Woordentuin
 
-Een lokale, Nederlandstalige woordjesoefening voor één leerling. Oefeningen, woorden en voortgang blijven in deze browser op dit apparaat; er is geen account, synchronisatie, reclame of externe analyse. De terugvraagronde is zelfrapportage, geen gecontroleerde spellingtoets.
+Een lokale, Nederlandstalige woordjesoefening voor één leerling. Oefeningen, woorden en voortgang blijven in deze browser op dit apparaat; er is geen account, synchronisatie, reclame of externe analyse. Het spel meet herkenning, niet zelfstandig vertalen of spellen.
 
 ## MVT uit het boek oefenen
 
-Kies op de startpagina **MVT · alle talen** en eventueel een hoofdstuk. Bij een nieuwe installatie is MVT de standaard. Nederlands staat links; Engels, Frans, Duits en Spaans staan door elkaar rechts, met de taal bij elke vertaling. Bij terugvragen wordt de gevraagde taal vóór het onthullen getoond.
+Kies op de startpagina **MVT · Frans, Duits en Spaans** en eventueel een hoofdstuk. Bij een nieuwe installatie is MVT de standaard. Nederlands staat links; Frans, Duits en Spaans staan door elkaar rechts, met de taal bij elke vertaling. Engels blijft beschikbaar als afzonderlijke oefentaal, met behoud van bestaande woorden en voortgang.
 
-- Zes paren per bord, ook in de eerste ronde; maximaal zes nieuwe vertalingen worden eerst getoond. Een kleine of dubbelzinnige selectie kan minder paren opleveren. Een al opgeslagen oudere ronde behoudt zijn indeling; de volgende ronde gebruikt zes paren.
-- Voortgang wordt per woord én doeltaal bewaard. Frans kennen betekent niet automatisch Duits kennen. Fouten en hints krijgen extra aandacht; de laatste één of twee overgebleven keuzes tellen niet als sterk bewijs van beheersing.
+- Drie borden van zes paren per ronde; maximaal zes nieuwe vertalingen worden eerst getoond. Een kleine of dubbelzinnige selectie kan minder paren opleveren. Een extra herhaling maakt een bestaand vol bord niet kleiner.
+- Na het laatste bord volgt alleen **Nog een ronde** of **Stoppen**. De handmatige terugvraagronde is vervallen, ook bij afzonderlijke talen. Oude zelfbeoordelingen blijven als historisch archief bewaard.
+- Voortgang wordt per woord, doeltaal en inhoudsversie bewaard. Frans kennen betekent niet automatisch Duits kennen. Fouten en hints krijgen extra aandacht; de laatste één of twee overgebleven keuzes tellen niet als sterk positief bewijs.
 - **Voor ouders → Alle MVT-boekwoorden** toont de volledige tabel met Nederlands en alle vier doeltalen. Daaronder kun je woorden aanpassen en de voortgang bekijken. Eigen toegevoegde woorden blijven beschikbaar in de afzonderlijke taalmodus, maar worden niet aan de exacte MVT-boekselectie toegevoegd.
 
 De vier foto's in `intput/` zijn overgenomen in `src/lib/content/words.ts`: **55 Nederlandse ingangen** (10 werkwoorden, 31 zelfstandige naamwoorden en 14 bijvoeglijke naamwoorden), met **210 anderstalige vormen**. De werkwoordenfoto bevat geen Engelse kolom; die vertalingen zijn niet verzonnen en worden niet gevraagd.
 
 Bij negen zelfstandige naamwoorden is de Nederlandse kolom afgesneden. Die Nederlandse betekenissen zijn afgeleid uit de zichtbare vertalingen en expliciet gemarkeerd. Ook twijfelachtige boekvormen, zoals Spaans `bebe` en Engels/Duits `enthusiast`, blijven herkenbaar overgenomen met een notitie voor oudercontrole. De twee betekenissen van *zijn* krijgen Nederlandse aanwijzingen, niet de Spaanse antwoorden `ser` en `estar`.
 
-Oude opslag en back-ups worden naar de MVT-indeling gemigreerd. Eigen wijzigingen en toevoegingen blijven behouden. Alleen bij inhoudelijk gewijzigde, onaangepaste boekwoorden wordt de bijbehorende voortgang opnieuw begonnen; een getroffen lopende ronde wordt dan opnieuw samengesteld.
+Opslag en reservekopieën uit versie 1 en 2 worden automatisch naar versie 3 gemigreerd. De nieuwe statistieken verzinnen geen tijden of eerste-pogingresultaten voor oude gegevens. Een lopende MVT-ronde met Engels wordt met uitleg opnieuw begonnen; een oude terugvraagronde wordt afgerond zonder extra leerresultaten te boeken. Eigen wijzigingen, Engelse voortgang en historische zelfbeoordelingen blijven behouden. De bestaande inhoudsmigratie van versie 1 kan nog wel de voortgang van inhoudelijk gewijzigde, onaangepaste boekwoorden opnieuw beginnen.
+
+## Hoe de oefening meegroeit
+
+- Het spel bewaart echte keuzes, fouten, hints, pogingen, keuzevolgorde en verbindvolgorde. Een verbetering na een fout blijft geholpen; opnieuw selecteren wist die fout niet.
+- Alleen actieve speeltijd telt mee. Opslaan en bordwisselingen worden niet meegeteld. Na focusverlies, herladen of hervatten krijgt het huidige bord geen betrouwbare tijdmeting; het volgende bord kan weer worden gemeten.
+- De laatste tien bordbeurten per woordenpaar bepalen het recente advies. Oude fouten blijven daardoor niet onbeperkt doorslaggevend. Een eerste, zelfstandige goede keuze uit minstens drie mogelijkheden telt zwaarder dan een laatste overgebleven paar.
+- De planning richt zich op ongeveer negen moeilijke/herhaalparen, zes nieuwe of andere herhaalparen en drie vertrouwde steunparen. Bij veel moeilijk materiaal kan dat twaalf/drie/drie worden. Beschikbare woorden, taalspreiding en ondubbelzinnige antwoorden gaan voor deze streefaantallen. Gemiste paren komen waar mogelijk pas na drie andere verbindingen opnieuw terug.
+- De bestaande intervallen van 1, 3, 7, 14 en 30 dagen blijven gelden. Herhalen in dezelfde ronde levert geen langetermijnbeheersing op.
+- Snelheid is alleen een zwak extra signaal, nooit een straf voor langzaam goed antwoorden. Vergelijking vereist minstens drie schone tijdmetingen voor het paar en twintig vergelijkbare metingen in dezelfde taal en keuzeband, verspreid over minstens twee sessies. Dit zijn voorzichtige ontwerpkeuzes, geen wetenschappelijk gevalideerde beheersingsgrenzen.
+
+Onder **Voor ouders → Herkenning tijdens het verbinden → Oefenoverzicht bekijken** staan eerste-pogingpercentages met aantallen, fouten/hints, schone antwoordtijd, volgorde, oefenadvies en oefendatums. Op een smal scherm staan de gegevens onder elkaar. MVT toont alleen de drie actieve doeltalen. Het kind krijgt geen timer, snelheidsscore of extra controlescherm.
 
 ## Ontwikkelen
 
@@ -66,19 +78,16 @@ De woorden uit het lesmateriaal moeten door een ouder of docent worden gecontrol
 ## Uitgevoerde controle
 
 - `npm run check`: 0 fouten en 0 waarschuwingen.
-- `npm test`: 24 geslaagde tests voor leerplanning, zes-parenborden, MVT-taaltoewijzing, migratie, voortgang en opslaggrenzen.
+- `npm test`: 56 geslaagde tests voor bewijsinterpretatie, tijdmeting, herhaalplanning, taalspreiding, zes-parenborden, migratie, reservekopieën en opslaggrenzen.
 - `npm run build`: geslaagde statische productiebuild.
-- In Chromium met de productiebuild: volledige oefenrondes, fouten en hints, afzonderlijke terugvraagvoortgang, hervatten na herladen, blokkering van een tweede speeltab en een lege woordselectie.
-- Een echte browseropslaglimiet opgelegd: een mislukte schrijfactie toont een fout en telt de combinatie niet als opgeslagen.
-- Oudergedeelte: dubbele invoer geweigerd, woorden geïmporteerd/bewerkt/goedgekeurd, back-up gedownload, voortgang gewist en de volledige back-up exact hersteld.
-- Zonder netwerk: oefenronde voltooid en opgeslagen, speelsessie na herladen hervat en ouderpagina geopend. Een ongecachet verzoek faalde tijdens deze controle.
-- Een nieuwe serviceworkerversie geactiveerd zonder wijziging van de opgeslagen gegevens.
-- Schermen visueel bekeken op 320 × 568, 390 × 844, 844 × 390 en 1024 × 768 browserpixels; geen horizontale pagina-overloop op deze afmetingen.
-- MVT: zes nieuwe paren en vier gemengde doeltalen, fouten/hints met zes keuzemogelijkheden, afzonderlijke taalvoortgang, taal vóór terugvragen, offline hervatten en oefenen, 55 boekregels in het ouderoverzicht en exact herstel van een back-up met gemengde sessie. Na de aanpassing aan herhalingen bleven alle drie borden zes paren bevatten: 18 combinaties offline voltooid.
-- Een bestaande versie-1-opslag met zes voortgangsrecords, eigen woorden en een lopende ronde gemigreerd; de onaangetaste voortgang en ronde bleven behouden.
-- Het zes-parenscherm op 390 pixels breed beoordeeld via een PDF van de scherm-CSS; de normale screenshotopname liep vast in de testbrowser. Dit is geen fysieke Safari-controle.
-- Het zes-parenwerkwoordenbord met Nederlandse betekenishulp gecontroleerd op 320 × 568 en 1024 × 768: twaalf tegels, geen horizontale pagina-overloop. Bij lange woorden of aanwijzingen is verticaal scrollen mogelijk; de tekst en tikvlakken worden niet kleiner gemaakt om alles in één scherm te persen.
-- De GitHub Pages-build lokaal onder `/woordentuin/` uitgevoerd: navigatie tussen start, ouderoverzicht en spel, 55 tabelregels, serviceworker op het juiste basispad, offline herladen en alle 18 combinaties voltooid.
+- Productiebuild in Chromium: volledige MVT-rondes met drie borden van zes paren, fouten, hints, correcties na opnieuw selecteren, rechtstreeks afronden en een volgende ronde met extra herhaling van gemiste/geholpen paren. Er ontstonden geen nieuwe zelfbeoordelingsrecords.
+- Een zelfstandige eerste match bewaarde zes echte keuzes; een correctie bleef poging twee en geholpen. Focusverlies en herladen leverden onbekende tijden op; een nieuw bord kreeg weer geldige tijdmetingen. Ook een rechts-eerst gekozen vertaling werd aan de juiste taal toegeschreven.
+- Een echte versie-2-opslag met 19 leergebeurtenissen en zeven voortgangsrecords via de serviceworker-update gemigreerd: gebeurtenissen en voortgang bleven exact behouden en de oude terugvraagronde werd een afrondscherm. Een oude actieve MVT-reservekopie met Engels werd met uitleg opnieuw begonnen.
+- Ouderoverzicht: 165 MVT-woordenparen, geen Engelse statistiekrijen, zichtbaar recent oefenadvies met aantallen en geen horizontale pagina-overloop op 390 en 1024 pixels breed.
+- De previewserver gestopt: een ongecachet netwerkverzoek faalde, opgeslagen pagina's konden herladen worden, een volledige MVT-ronde werd voltooid en bewaard, en afzonderlijk Engels bleef oefenbaar zonder terugvraagronde.
+- Een echte reservekopie gedownload, voortgang gewist en de volledige versie-3-reservekopie exact hersteld. Een reservekopie met ongeldige poginggegevens werd afgewezen zonder opgeslagen gegevens te veranderen.
+- Een volgende serviceworker-update behield alle 92 opgeslagen gebeurtenissen en de overige gegevens exact.
+- Speelschermen op 390 × 844 en 1024 × 1366 browserpixels gecontroleerd: twaalf tegels en geen horizontale pagina-overloop. Speelscherm en mobiel ouderoverzicht ook visueel beoordeeld via PDF-weergaven van de scherm-CSS; de normale screenshotopname liep eerder vast in de testbrowser. Dit is geen fysieke Safari-controle.
 
 ## Nog fysiek te beoordelen
 

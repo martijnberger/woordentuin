@@ -2,9 +2,13 @@ import { openDB, type DBSchema } from 'idb';
 import type { Board, Exposure, Language, Progress, Session, Settings, Snapshot, TargetLanguage, Word } from '../model';
 import { MATCH_PAIRS } from '../model';
 import { applyExposure, progressKey, targetLanguages } from '../learning';
-import { legacySeedWords, seedWords } from '../content/words';
+import { legacySeedWords, MVT_WORD_IDS, seedWords } from '../content/words';
 
 interface Store extends DBSchema { state: { key: string; value: Snapshot } }
+type LegacyBoard = Omit<Board, 'attempts' | 'selected'>;
+type LegacySession = Omit<Session, 'phase' | 'boards'> & { phase: Session['phase'] | 'recall'; boards: LegacyBoard[]; recallWordIds: string[]; recallIndex: number };
+type LegacyExposure = Omit<Exposure, 'context'>;
+type LegacySnapshot = Omit<Snapshot, 'schemaVersion' | 'notice' | 'session' | 'exposures'> & { schemaVersion: 2; session: LegacySession | null; exposures: LegacyExposure[] };
 const DB_NAME = 'woordentuin';
 const LOCK_NAME = 'woordentuin-play';
 const languages: Language[] = ['nl', 'de', 'fr', 'es', 'en'];
@@ -33,31 +37,44 @@ function validProgress(value: unknown): value is Progress {
   if (!object(value) || !text(value.key) || !text(value.wordId) || !oneOf(value.language, targets) || !oneOf(value.mode, ['match', 'recall']) || !integer(value.revision) || value.revision < 1 || !integer(value.stage) || value.stage > 4) return false;
   return ['dueAt', 'lastPracticedAt', 'successes', 'mistakes', 'hints'].every((key) => integer(value[key])) && ['lastPromotedDay', 'lastFailedDay'].every((key) => value[key] === null || (typeof value[key] === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value[key] as string)));
 }
-function validExposure(value: unknown): value is Exposure {
-  return object(value) && text(value.id) && text(value.sessionId) && text(value.wordId) && (value.chosenWordId === undefined || text(value.chosenWordId)) && oneOf(value.language, targets) && oneOf(value.mode, ['match', 'recall']) && oneOf(value.outcome, ['correct', 'incorrect', 'hint']) && integer(value.choicesRemaining) && value.choicesRemaining <= MATCH_PAIRS && integer(value.at) && integer(value.revision) && value.revision > 0;
+function validExposure(value: unknown, legacy = false): boolean {
+  if (!object(value) || !text(value.id) || !text(value.sessionId) || !text(value.wordId) || !(value.chosenWordId === undefined || text(value.chosenWordId)) || !oneOf(value.language, targets) || !oneOf(value.mode, ['match', 'recall']) || !oneOf(value.outcome, ['correct', 'incorrect', 'hint']) || !integer(value.choicesRemaining) || value.choicesRemaining > MATCH_PAIRS || !integer(value.at) || !integer(value.revision) || value.revision < 1) return false;
+  if (legacy || value.context === null) return true;
+  const context = value.context;
+  if (!object(context) || value.mode !== 'match' || !integer(context.boardIndex) || context.boardIndex > 2 || !integer(context.boardSize) || context.boardSize < 1 || context.boardSize > MATCH_PAIRS || !integer(context.attempt) || context.attempt < 1 || !oneOf(context.selectionSide, ['left', 'right']) || !integer(context.selectionOrder) || context.selectionOrder < 1 || context.selectionOrder > context.boardSize || typeof context.assisted !== 'boolean' || typeof context.revisit !== 'boolean') return false;
+  if (value.choicesRemaining < 1 || value.choicesRemaining > context.boardSize || ((context.attempt > 1 || value.outcome === 'hint') && !context.assisted)) return false;
+  if (value.outcome === 'incorrect' ? context.matchOrder !== null : !integer(context.matchOrder) || context.matchOrder < 1 || context.matchOrder > context.boardSize || context.matchOrder !== context.boardSize - value.choicesRemaining + 1) return false;
+  return ['selectionMs', 'responseMs'].every((key) => context[key] === null || (typeof context[key] === 'number' && Number.isFinite(context[key]) && context[key] >= 0));
 }
-function validBoard(value: unknown, ids: Set<string>): value is Board {
+function validBoard(value: unknown, ids: Set<string>, legacy: boolean): boolean {
   if (!object(value) || !['left', 'right', 'matched', 'failed', 'hinted'].every((key) => strings(value[key]) && (value[key] as string[]).every((id) => ids.has(id)))) return false;
   const board = value as unknown as Board;
-  return board.left.length > 0 && board.left.length <= MATCH_PAIRS && board.left.length === board.right.length && board.left.every((id) => board.right.includes(id)) && [...board.matched, ...board.failed, ...board.hinted].every((id) => board.left.includes(id));
+  if (!(board.left.length > 0 && board.left.length <= MATCH_PAIRS && board.left.length === board.right.length && board.left.every((id) => board.right.includes(id)) && [...board.matched, ...board.failed, ...board.hinted].every((id) => board.left.includes(id)))) return false;
+  return legacy || (object(board.attempts) && Object.entries(board.attempts).every(([id, count]) => board.left.includes(id) && integer(count) && count >= 1) && [...board.failed, ...board.hinted].every((id) => (board.attempts[id] ?? 0) >= 1) && strings(board.selected) && board.selected.every((id) => board.left.includes(id)));
 }
-function validSession(value: unknown): value is Session {
-  if (!object(value) || !text(value.id) || !integer(value.version) || !validSettings(value.settings) || !oneOf(value.phase, ['intro', 'match', 'recall', 'results']) || !Array.isArray(value.words) || !value.words.every(validWord)) return false;
+function validSession(value: unknown, legacy: boolean): boolean {
+  if (!object(value) || !text(value.id) || !integer(value.version) || !validSettings(value.settings) || !oneOf(value.phase, legacy ? ['intro', 'match', 'recall', 'results'] : ['intro', 'match', 'results']) || !Array.isArray(value.words) || !value.words.every(validWord)) return false;
   const settings = value.settings;
   const ids = new Set(value.words.map((word: Word) => word.id));
   if (!object(value.wordLanguages) || Object.keys(value.wordLanguages).length !== ids.size || !value.words.every((word: Word) => {
     const language = (value.wordLanguages as Record<string, unknown>)[word.id];
-    return Object.hasOwn(value.wordLanguages as object, word.id) && word.enabled && word.reviewed && text(word.forms.nl) && oneOf(language, targets) && targetLanguages(word, settings).includes(language as TargetLanguage);
+    const eligible = legacy || value.phase === 'results'
+      ? (settings.language === 'mvt' ? MVT_WORD_IDS.has(word.id) && oneOf(language, targets) && text(word.forms[language as TargetLanguage]) : language === settings.language && text(word.forms[settings.language]))
+      : targetLanguages(word, settings).includes(language as TargetLanguage);
+    return Object.hasOwn(value.wordLanguages as object, word.id) && word.enabled && word.reviewed && text(word.forms.nl) && oneOf(language, targets) && eligible;
   })) return false;
-  if (ids.size !== value.words.length || !Array.isArray(value.boards) || value.boards.length > 3 || !value.boards.every((board) => validBoard(board, ids)) || !strings(value.newWordIds) || !strings(value.recallWordIds) || ![...value.newWordIds, ...value.recallWordIds].every((id) => ids.has(id))) return false;
-  if (!['boardIndex', 'recallIndex', 'completedPairs', 'startedAt', 'correct', 'mistakes', 'hints'].every((key) => integer(value[key])) || (value.boardIndex as number) > value.boards.length || (value.recallIndex as number) > value.recallWordIds.length || typeof value.feedback !== 'string') return false;
+  if (ids.size !== value.words.length || !Array.isArray(value.boards) || value.boards.length > 3 || !value.boards.every((board) => validBoard(board, ids, legacy)) || !strings(value.newWordIds) || !value.newWordIds.every((id) => ids.has(id))) return false;
+  if (!['boardIndex', 'completedPairs', 'startedAt', 'correct', 'mistakes', 'hints'].every((key) => integer(value[key])) || (value.boardIndex as number) > value.boards.length || typeof value.feedback !== 'string') return false;
   if ((value.phase === 'intro' || value.phase === 'match') && (value.boardIndex as number) >= value.boards.length) return false;
-  if (value.phase === 'recall' && (value.recallIndex as number) >= value.recallWordIds.length) return false;
+  if (legacy && (!strings(value.recallWordIds) || !value.recallWordIds.every((id) => ids.has(id)) || !integer(value.recallIndex) || value.recallIndex > value.recallWordIds.length || (value.phase === 'recall' && value.recallIndex >= value.recallWordIds.length))) return false;
+  if (!legacy && (Object.hasOwn(value, 'recallWordIds') || Object.hasOwn(value, 'recallIndex'))) return false;
   return value.selection === null || (object(value.selection) && oneOf(value.selection.side, ['left', 'right']) && text(value.selection.wordId) && ids.has(value.selection.wordId));
 }
-function validateSnapshot(value: unknown): asserts value is Snapshot {
-  if (!object(value) || value.schemaVersion !== 2 || !Array.isArray(value.words) || !value.words.every(validWord) || !object(value.progress) || !Array.isArray(value.exposures) || !value.exposures.every(validExposure) || !validSettings(value.settings) || !(value.session === null || validSession(value.session))) invalid();
-  const snapshot = value as unknown as Snapshot;
+function validateSnapshot(value: unknown, legacy: true): asserts value is LegacySnapshot;
+function validateSnapshot(value: unknown, legacy?: false): asserts value is Snapshot;
+function validateSnapshot(value: unknown, legacy = false): void {
+  if (!object(value) || value.schemaVersion !== (legacy ? 2 : 3) || (!legacy && value.notice !== null && !text(value.notice)) || !Array.isArray(value.words) || !value.words.every(validWord) || !object(value.progress) || !Array.isArray(value.exposures) || !value.exposures.every((event) => validExposure(event, legacy)) || !validSettings(value.settings) || !(value.session === null || validSession(value.session, legacy))) invalid();
+  const snapshot = value as unknown as Snapshot | LegacySnapshot;
   const words = new Map(snapshot.words.map((word) => [word.id, word]));
   if (words.size !== snapshot.words.length || new Set(snapshot.exposures.map((event) => event.id)).size !== snapshot.exposures.length) invalid();
   for (const [key, progress] of Object.entries(snapshot.progress)) {
@@ -68,6 +85,10 @@ function validateSnapshot(value: unknown): asserts value is Snapshot {
   for (const event of snapshot.exposures) {
     const word = words.get(event.wordId);
     if (!word || word.revision !== event.revision || !word.forms[event.language] || (event.chosenWordId && !words.has(event.chosenWordId)) || (snapshot.session?.id === event.sessionId && snapshot.session.wordLanguages[event.wordId] !== event.language)) invalid();
+    if (!legacy && 'context' in event && event.context && snapshot.session?.id === event.sessionId) {
+      const board = snapshot.session.boards[event.context.boardIndex];
+      if (!board || board.left.length !== event.context.boardSize || !board.left.includes(event.wordId) || (event.chosenWordId && !board.left.includes(event.chosenWordId))) invalid();
+    }
   }
   if (snapshot.session && snapshot.session.words.some((word) => {
     const current = words.get(word.id);
@@ -84,35 +105,60 @@ function sameValue(a: unknown, b: unknown): boolean {
 }
 function normalizeSnapshot(value: unknown): Snapshot {
   if (!object(value)) return invalid();
-  if (value.schemaVersion === 2) { validateSnapshot(value); return value; }
-  if (value.schemaVersion !== 1 || !object(value.settings) || !oneOf(value.settings.language, targets)) return invalid();
-  let session = value.session;
-  if (session !== null) {
-    if (!object(session) || !object(session.settings) || !oneOf(session.settings.language, targets) || !Array.isArray(session.words)) return invalid();
-    const language = session.settings.language;
-    session = { ...session, wordLanguages: Object.fromEntries(session.words.map((word: unknown) => {
-      if (!object(word) || !text(word.id)) return invalid();
-      return [word.id, language];
-    })) };
+  if (value.schemaVersion === 3) { validateSnapshot(value); return value; }
+  if (value.schemaVersion !== 1 && value.schemaVersion !== 2) return invalid();
+  let candidate = value;
+  if (value.schemaVersion === 1) {
+    if (!object(value.settings) || !oneOf(value.settings.language, targets)) return invalid();
+    let session = value.session;
+    if (session !== null) {
+      if (!object(session) || !object(session.settings) || !oneOf(session.settings.language, targets) || !Array.isArray(session.words)) return invalid();
+      const language = session.settings.language;
+      session = { ...session, wordLanguages: Object.fromEntries(session.words.map((word: unknown) => {
+        if (!object(word) || !text(word.id)) return invalid();
+        return [word.id, language];
+      })) };
+    }
+    candidate = { ...value, schemaVersion: 2, session };
   }
-  const migrated: unknown = { ...value, schemaVersion: 2, session };
-  validateSnapshot(migrated);
-  const legacy = new Map(legacySeedWords.map((word) => [word.id, word]));
-  const current = new Map(seedWords.map((word) => [word.id, word]));
-  const changed = new Set<string>();
-  const words = migrated.words.map((word) => {
-    const old = legacy.get(word.id), replacement = current.get(word.id);
-    if (!old || !replacement || !sameValue(word, old)) return word;
-    const revised = material(word) !== material(replacement);
-    if (revised) changed.add(word.id);
-    return { ...structuredClone(replacement), revision: revised ? Math.max(word.revision + 1, replacement.revision) : word.revision };
-  });
-  const result: Snapshot = {
-    ...migrated, words,
-    progress: Object.fromEntries(Object.entries(migrated.progress).filter(([, progress]) => !changed.has(progress.wordId))),
-    exposures: migrated.exposures.filter((event) => !changed.has(event.wordId)),
-    session: migrated.session?.words.some((word) => changed.has(word.id)) ? null : migrated.session
-  };
+  // Validate against the old four-language rules before applying the MVT cutover.
+  validateSnapshot(candidate, true);
+  let migrated: LegacySnapshot = candidate;
+  if (value.schemaVersion === 1) {
+    const legacy = new Map(legacySeedWords.map((word) => [word.id, word]));
+    const current = new Map(seedWords.map((word) => [word.id, word]));
+    const changed = new Set<string>();
+    const words = migrated.words.map((word) => {
+      const old = legacy.get(word.id), replacement = current.get(word.id);
+      if (!old || !replacement || !sameValue(word, old)) return word;
+      const revised = material(word) !== material(replacement);
+      if (revised) changed.add(word.id);
+      return { ...structuredClone(replacement), revision: revised ? Math.max(word.revision + 1, replacement.revision) : word.revision };
+    });
+    migrated = {
+      ...migrated, words,
+      progress: Object.fromEntries(Object.entries(migrated.progress).filter(([, progress]) => !changed.has(progress.wordId))),
+      exposures: migrated.exposures.filter((event) => !changed.has(event.wordId)),
+      session: migrated.session?.words.some((word) => changed.has(word.id)) ? null : migrated.session
+    };
+  }
+  let session: Session | null = null;
+  let notice: string | null = null;
+  if (migrated.session) {
+    const { recallWordIds: _recallWordIds, recallIndex: _recallIndex, ...old } = migrated.session;
+    if ((old.phase === 'intro' || old.phase === 'match') && old.settings.language === 'mvt' && Object.values(old.wordLanguages).includes('en')) {
+      notice = 'MVT oefent nu Frans, Duits en Spaans. Er start een nieuwe ronde; je opgeslagen voortgang blijft bewaard.';
+    } else {
+      if (old.phase === 'recall') notice = 'Je eerdere ronde is afgerond. Terugvragen is vervallen; je opgeslagen voortgang blijft bewaard.';
+      session = {
+        ...old, phase: old.phase === 'recall' ? 'results' : old.phase, selection: null,
+        boards: old.boards.map((board) => ({
+          ...board, attempts: Object.fromEntries([...new Set([...board.failed, ...board.hinted])].map((id) => [id, 1])), selected: []
+        }))
+      };
+    }
+  }
+  const result: Snapshot = { ...migrated, schemaVersion: 3, notice, session, exposures: migrated.exposures.map((event) => ({ ...event, context: null })) };
   validateSnapshot(result);
   return result;
 }
@@ -120,7 +166,7 @@ function db() { return openDB<Store>(DB_NAME, 1, { upgrade(database) { database.
 function initial(): Snapshot {
   let timezone = 'Europe/Amsterdam';
   try { timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || timezone; } catch { /* use fallback */ }
-  return { schemaVersion: 2, words: structuredClone(seedWords), progress: {}, exposures: [], settings: { language: 'mvt', chapter: 'all', timezone }, session: null };
+  return { schemaVersion: 3, notice: null, words: structuredClone(seedWords), progress: {}, exposures: [], settings: { language: 'mvt', chapter: 'all', timezone }, session: null };
 }
 async function mutate(fn: (snapshot: Snapshot) => Snapshot): Promise<Snapshot> {
   const database = await db();
@@ -172,7 +218,7 @@ export async function saveSession(session: Session, exposures: Exposure[] = []):
       progress[key] = applyExposure(progress[key], event, session.settings.timezone);
       known.set(event.id, event); events.push(event);
     }
-    return { ...s, session: { ...session, selection: null }, progress, exposures: events };
+    return { ...s, notice: null, session: { ...session, selection: null }, progress, exposures: events };
   });
 }
 export async function clearSession(): Promise<void> { await mutate((s) => ({ ...s, session: null })); }
@@ -201,4 +247,4 @@ export async function importBackup(json: string): Promise<Snapshot> {
   const snapshot = normalizeSnapshot(data);
   return exclusive(() => mutate(() => snapshot));
 }
-export async function resetProgress(): Promise<Snapshot> { return exclusive(() => mutate((s) => ({ ...s, progress: {}, exposures: [], session: null }))); }
+export async function resetProgress(): Promise<Snapshot> { return exclusive(() => mutate((s) => ({ ...s, notice: null, progress: {}, exposures: [], session: null }))); }

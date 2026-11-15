@@ -2,9 +2,9 @@
 
 Prepared by an AI assistant. The SvelteKit application and MVT book mode are implemented; this document retains the research and design rationale. Production-browser checks have run, but physical iPhone/iPad validation remains outstanding. See README.md for current usage, content caveats, and verification.
 
-## Next iteration — proposal, not implemented
+## Implemented iteration — adaptive, matching-only MVT
 
-This proposal supersedes the four-language MVT and post-session recall recommendations below. The rest of this document describes the existing baseline and its research. No game behaviour changes are included in this planning changeset.
+The changes in sections A–F are implemented. They supersede the four-language MVT and post-session recall recommendations in the historical research below. `README.md` records the exercised production-browser scenarios, migration checks, and 56 passing tests. Publication is a separate action; physical iPhone/iPad Safari validation is still outstanding.
 
 ### A. Three-language MVT
 
@@ -40,7 +40,7 @@ Timing rules:
 - Invalidate the pending timing sample after backgrounding, losing focus, reloading, or resuming a session. Missing/invalid timing is not zero, failure, or “slow”.
 - Deselecting/reselecting a word must not erase its previous attempts or turn a correction into a first-attempt success.
 - An incorrect pair remains evidence about the first-selected anchor, not an automatic failure for the distractor.
-- Store the real choice count separately from assistance. Currently assisted successes use `choicesRemaining = 0`; that encoding is insufficient for the requested statistics.
+- Store the real choice count separately from assistance. Older assisted successes used `choicesRemaining = 0`; preserve those archived records without inventing missing context.
 
 Interpretation:
 
@@ -103,7 +103,7 @@ Primary files: `src/lib/model.ts`, `src/lib/learning/index.ts`, `src/lib/storage
 - Browser smoke: mobile-width full round, another round with prioritised missed pairs, parent statistics, background/resume, offline reload, and export/import. Check actual iPhone/iPad Safari before claiming device validation.
 
 
-## 1. Recommendation
+## 1. Original research and baseline recommendation
 
 Build a small, mobile-first SvelteKit game for practising your son's actual school vocabulary. Use Duolingo-style two-column matching as the main activity, with short sessions, gentle feedback, and spaced reviews that favour words he struggles with.
 
