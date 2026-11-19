@@ -1,8 +1,9 @@
 import { openDB, type DBSchema } from 'idb';
 import type { Board, Exposure, Language, Progress, Session, Settings, Snapshot, TargetLanguage, Word } from '../model';
 import { MATCH_PAIRS } from '../model';
-import { applyExposure, progressKey, targetLanguages } from '../learning';
+import { applyExposure, PRACTICE_MODES, progressKey, targetLanguages } from '../learning';
 import { legacySeedWords, MVT_WORD_IDS, seedWords } from '../content/words';
+import { french3VwoWords } from '../content/french-3vwo';
 
 interface Store extends DBSchema { state: { key: string; value: Snapshot } }
 type LegacyBoard = Omit<Board, 'attempts' | 'selected'>;
@@ -21,8 +22,8 @@ const integer = (value: unknown): value is number => typeof value === 'number' &
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every(text) && new Set(value).size === value.length;
 const oneOf = (value: unknown, values: readonly string[]): boolean => typeof value === 'string' && values.includes(value);
 
-function validSettings(value: unknown): value is Settings {
-  if (!object(value) || !oneOf(value.language, [...targets, 'mvt']) || !text(value.chapter) || !text(value.timezone)) return false;
+function validSettings(value: unknown, legacy = false): value is Settings {
+  if (!object(value) || !text(value.language) || !Object.hasOwn(PRACTICE_MODES, value.language) || (legacy && value.language === 'fr-3vwo') || !text(value.chapter) || !text(value.timezone)) return false;
   try { new Intl.DateTimeFormat('nl', { timeZone: value.timezone }); return true; } catch { return false; }
 }
 function validWord(value: unknown): value is Word {
@@ -53,13 +54,14 @@ function validBoard(value: unknown, ids: Set<string>, legacy: boolean): boolean 
   return legacy || (object(board.attempts) && Object.entries(board.attempts).every(([id, count]) => board.left.includes(id) && integer(count) && count >= 1) && [...board.failed, ...board.hinted].every((id) => (board.attempts[id] ?? 0) >= 1) && strings(board.selected) && board.selected.every((id) => board.left.includes(id)));
 }
 function validSession(value: unknown, legacy: boolean): boolean {
-  if (!object(value) || !text(value.id) || !integer(value.version) || !validSettings(value.settings) || !oneOf(value.phase, legacy ? ['intro', 'match', 'recall', 'results'] : ['intro', 'match', 'results']) || !Array.isArray(value.words) || !value.words.every(validWord)) return false;
+  if (!object(value) || !text(value.id) || !integer(value.version) || !validSettings(value.settings, legacy) || !oneOf(value.phase, legacy ? ['intro', 'match', 'recall', 'results'] : ['intro', 'match', 'results']) || !Array.isArray(value.words) || !value.words.every(validWord)) return false;
   const settings = value.settings;
   const ids = new Set(value.words.map((word: Word) => word.id));
   if (!object(value.wordLanguages) || Object.keys(value.wordLanguages).length !== ids.size || !value.words.every((word: Word) => {
     const language = (value.wordLanguages as Record<string, unknown>)[word.id];
-    const eligible = legacy || value.phase === 'results'
-      ? (settings.language === 'mvt' ? MVT_WORD_IDS.has(word.id) && oneOf(language, targets) && text(word.forms[language as TargetLanguage]) : language === settings.language && text(word.forms[settings.language]))
+    // Historical MVT rounds could contain English; they may only be kept as results.
+    const eligible = settings.language === 'mvt' && (legacy || value.phase === 'results')
+      ? MVT_WORD_IDS.has(word.id) && oneOf(language, targets) && text(word.forms[language as TargetLanguage])
       : targetLanguages(word, settings).includes(language as TargetLanguage);
     return Object.hasOwn(value.wordLanguages as object, word.id) && word.enabled && word.reviewed && text(word.forms.nl) && oneOf(language, targets) && eligible;
   })) return false;
@@ -73,7 +75,7 @@ function validSession(value: unknown, legacy: boolean): boolean {
 function validateSnapshot(value: unknown, legacy: true): asserts value is LegacySnapshot;
 function validateSnapshot(value: unknown, legacy?: false): asserts value is Snapshot;
 function validateSnapshot(value: unknown, legacy = false): void {
-  if (!object(value) || value.schemaVersion !== (legacy ? 2 : 3) || (!legacy && value.notice !== null && !text(value.notice)) || !Array.isArray(value.words) || !value.words.every(validWord) || !object(value.progress) || !Array.isArray(value.exposures) || !value.exposures.every((event) => validExposure(event, legacy)) || !validSettings(value.settings) || !(value.session === null || validSession(value.session, legacy))) invalid();
+  if (!object(value) || value.schemaVersion !== (legacy ? 2 : 4) || (!legacy && value.notice !== null && !text(value.notice)) || !Array.isArray(value.words) || !value.words.every(validWord) || !object(value.progress) || !Array.isArray(value.exposures) || !value.exposures.every((event) => validExposure(event, legacy)) || !validSettings(value.settings, legacy) || !(value.session === null || validSession(value.session, legacy))) invalid();
   const snapshot = value as unknown as Snapshot | LegacySnapshot;
   const words = new Map(snapshot.words.map((word) => [word.id, word]));
   if (words.size !== snapshot.words.length || new Set(snapshot.exposures.map((event) => event.id)).size !== snapshot.exposures.length) invalid();
@@ -103,9 +105,18 @@ function sameValue(a: unknown, b: unknown): boolean {
   }
   return a === b;
 }
+function addFrench3Vwo(snapshot: Snapshot): Snapshot {
+  const ids = new Set(snapshot.words.map((word) => word.id));
+  return { ...snapshot, words: [...snapshot.words, ...structuredClone(french3VwoWords.filter((word) => !ids.has(word.id)))] };
+}
 function normalizeSnapshot(value: unknown): Snapshot {
   if (!object(value)) return invalid();
-  if (value.schemaVersion === 3) { validateSnapshot(value); return value; }
+  if (value.schemaVersion === 4) { validateSnapshot(value); return value; }
+  if (value.schemaVersion === 3) {
+    const result = { ...value, schemaVersion: 4 };
+    validateSnapshot(result);
+    return addFrench3Vwo(result);
+  }
   if (value.schemaVersion !== 1 && value.schemaVersion !== 2) return invalid();
   let candidate = value;
   if (value.schemaVersion === 1) {
@@ -158,15 +169,15 @@ function normalizeSnapshot(value: unknown): Snapshot {
       };
     }
   }
-  const result: Snapshot = { ...migrated, schemaVersion: 3, notice, session, exposures: migrated.exposures.map((event) => ({ ...event, context: null })) };
+  const result: Snapshot = { ...migrated, schemaVersion: 4, notice, session, exposures: migrated.exposures.map((event) => ({ ...event, context: null })) };
   validateSnapshot(result);
-  return result;
+  return addFrench3Vwo(result);
 }
 function db() { return openDB<Store>(DB_NAME, 1, { upgrade(database) { database.createObjectStore('state'); } }); }
 function initial(): Snapshot {
   let timezone = 'Europe/Amsterdam';
   try { timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || timezone; } catch { /* use fallback */ }
-  return { schemaVersion: 3, notice: null, words: structuredClone(seedWords), progress: {}, exposures: [], settings: { language: 'mvt', chapter: 'all', timezone }, session: null };
+  return { schemaVersion: 4, notice: null, words: structuredClone([...seedWords, ...french3VwoWords]), progress: {}, exposures: [], settings: { language: 'mvt', chapter: 'all', timezone }, session: null };
 }
 async function mutate(fn: (snapshot: Snapshot) => Snapshot): Promise<Snapshot> {
   const database = await db();

@@ -15,7 +15,13 @@ De vier foto's in `intput/` zijn overgenomen in `src/lib/content/words.ts`: **55
 
 Bij negen zelfstandige naamwoorden is de Nederlandse kolom afgesneden. Die Nederlandse betekenissen zijn afgeleid uit de zichtbare vertalingen en expliciet gemarkeerd. Ook twijfelachtige boekvormen, zoals Spaans `bebe` en Engels/Duits `enthusiast`, blijven herkenbaar overgenomen met een notitie voor oudercontrole. De twee betekenissen van *zijn* krijgen Nederlandse aanwijzingen, niet de Spaanse antwoorden `ser` en `estar`.
 
-Opslag en reservekopieën uit versie 1 en 2 worden automatisch naar versie 3 gemigreerd. De nieuwe statistieken verzinnen geen tijden of eerste-pogingresultaten voor oude gegevens. Een lopende MVT-ronde met Engels wordt met uitleg opnieuw begonnen; een oude terugvraagronde wordt afgerond zonder extra leerresultaten te boeken. Eigen wijzigingen, Engelse voortgang en historische zelfbeoordelingen blijven behouden. De bestaande inhoudsmigratie van versie 1 kan nog wel de voortgang van inhoudelijk gewijzigde, onaangepaste boekwoorden opnieuw beginnen.
+Opslag en reservekopieën uit versie 1, 2 en 3 worden automatisch naar versie 4 gemigreerd. Vanaf versie 4 wordt de 3 VWO-woordenlijst eenmalig toegevoegd aan bestaande gegevens. De statistieken verzinnen geen tijden of eerste-pogingresultaten voor oude gegevens. Een lopende MVT-ronde uit versie 2 met Engels wordt met uitleg opnieuw begonnen; een oude terugvraagronde wordt afgerond zonder extra leerresultaten te boeken. Eigen wijzigingen, Engelse voortgang en historische zelfbeoordelingen blijven behouden. De bestaande inhoudsmigratie van versie 1 kan nog wel de voortgang van inhoudelijk gewijzigde, onaangepaste boekwoorden opnieuw beginnen.
+
+## Frans voor 3 VWO oefenen
+
+Kies op de startpagina **Frans · 3 VWO** en daarna **Alle onderdelen** of een onderdeel uit **Apprendre 1–10**. De oefenset voor *Unité 2 · Sports et passions* bevat 176 Nederlands–Franse kaartparen: 113 woordenschatparen, 14 voorbeeldzinnen en 49 paren voor *pouvoir*, bezittelijke voornaamwoorden en kloktijden. Je kunt op het bord aan beide kanten beginnen; de oefening toetst herkenning, geen spelling of uitspraak.
+
+De set staat los van **Frans** en **MVT**. Onder **Voor ouders** kun je dezelfde set kiezen, de gekoppelde vormen bekijken of aanpassen en de voortgang per onderdeel zien. De overgenomen kaartparen staan in `src/lib/content/french-3vwo.ts`; de foto's zelf zijn geen onderdeel van de app.
 
 ## Hoe de oefening meegroeit
 

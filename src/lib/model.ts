@@ -1,6 +1,6 @@
 export type Language = 'nl' | 'de' | 'fr' | 'es' | 'en';
 export type TargetLanguage = Exclude<Language, 'nl'>;
-export type PracticeLanguage = TargetLanguage | 'mvt';
+export type PracticeLanguage = TargetLanguage | 'mvt' | 'fr-3vwo';
 export const MATCH_PAIRS = 6;
 
 export interface Word {
@@ -45,6 +45,6 @@ export interface Session {
   hints: number; selection: { side: 'left' | 'right'; wordId: string } | null; feedback: string;
 }
 export interface Snapshot {
-  schemaVersion: 3; words: Word[]; progress: Record<string, Progress>; exposures: Exposure[];
+  schemaVersion: 4; words: Word[]; progress: Record<string, Progress>; exposures: Exposure[];
   settings: Settings; session: Session | null; notice: string | null;
 }

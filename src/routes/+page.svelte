@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
-  import { PRACTICE_MODES, eligibleWords, progressKey, targetLanguages } from '#lib/learning/index.ts';
+  import { PRACTICE_MODES, eligibleWords, practiceChapters, progressKey, targetLanguages } from '#lib/learning/index.ts';
   import { loadSnapshot, saveSettings } from '#lib/storage/index.ts';
   import type { Snapshot, PracticeLanguage } from '#lib/model.ts';
 
@@ -10,7 +10,7 @@
   let busy = $state(false);
   let language = $state<PracticeLanguage>('mvt');
   let chapter = $state('all');
-  let chapters = $derived(snapshot ? [...new Set(snapshot.words.map((word) => word.chapter))].sort((a, b) => a.localeCompare(b, 'nl')) : []);
+  let chapters = $derived(snapshot ? practiceChapters(snapshot.words, language) : []);
   let eligible = $derived(snapshot ? eligibleWords(snapshot.words, { ...snapshot.settings, language, chapter }) : []);
   let pairs = $derived(eligible.flatMap((word) => targetLanguages(word, { ...snapshot!.settings, language, chapter }).map((target) => ({ word, target }))));
   let due = $derived(snapshot ? pairs.filter(({ word, target }) => {
@@ -31,11 +31,14 @@
     }).catch((reason) => { error = message(reason); });
   });
   function message(reason: unknown) { return reason instanceof Error ? reason.message : 'De gegevens op dit apparaat konden niet worden geopend.'; }
-  async function changeSettings() {
+  async function changeSettings(nextLanguage: PracticeLanguage, nextChapter: string) {
     if (!snapshot || busy) return;
     busy = true;
     error = '';
     const previous = snapshot.settings;
+    if (nextLanguage !== language && !practiceChapters(snapshot.words, nextLanguage).includes(nextChapter)) nextChapter = 'all';
+    language = nextLanguage;
+    chapter = nextChapter;
     try {
       const settings = { ...previous, language, chapter };
       await saveSettings(settings);
@@ -62,8 +65,15 @@
       <section class="setup-card" aria-labelledby="setup-heading">
         <div class="section-heading"><div><p class="eyebrow">JOUW OEFENPLEK</p><h2 id="setup-heading">Klaar om te groeien?</h2></div><span class="step-badge" aria-hidden="true">01</span></div>
         {#if active}<div class="resume-note"><strong>Je ronde staat voor je klaar.</strong><span>Ga verder met {PRACTICE_MODES[active.settings.language]}{active.settings.chapter !== 'all' ? ` · ${active.settings.chapter}` : ''}.</span></div>{/if}
-        <div class="field-grid"><label>Taal<select bind:value={language} onchange={changeSettings} disabled={busy || !!active}>{#each Object.entries(PRACTICE_MODES) as [code, label]}<option value={code}>{label}</option>{/each}</select></label><label>Hoofdstuk<select bind:value={chapter} onchange={changeSettings} disabled={busy || !!active}><option value="all">Alle hoofdstukken</option>{#each chapters as name}<option value={name}>{name}</option>{/each}</select></label></div>
-        {#if language === 'mvt'}<p class="muted small">MVT oefent de woorden uit het boek met Nederlands als basis en Frans, Duits en Spaans door elkaar. Engels kun je apart oefenen. Per woord verschilt de beschikbare vertaling.</p>{/if}
+        <div class="field-grid" class:course-fields={language === 'fr-3vwo'}>
+          <label>Taal<select value={language} onchange={(event) => changeSettings(event.currentTarget.value as PracticeLanguage, chapter)} disabled={busy || !!active}>{#each Object.entries(PRACTICE_MODES) as [code, label]}<option value={code}>{label}</option>{/each}</select></label>
+          <label>{language === 'fr-3vwo' ? 'Onderdeel' : 'Hoofdstuk'}<select value={chapter} onchange={(event) => changeSettings(language, event.currentTarget.value)} disabled={busy || !!active}><option value="all">{language === 'fr-3vwo' ? 'Alle onderdelen' : 'Alle hoofdstukken'}</option>{#each chapters as name}<option value={name}>{name}</option>{/each}</select></label>
+        </div>
+        {#if language === 'mvt'}
+          <p class="muted small">MVT oefent de woorden uit het boek met Nederlands als basis en Frans, Duits en Spaans door elkaar. Engels kun je apart oefenen. Per woord verschilt de beschikbare vertaling.</p>
+        {:else if language === 'fr-3vwo'}
+          <p class="muted small"><strong>Unité 2 · Sports et passions.</strong> Verbind Frans en Nederlands: woorden, zinnen, grammatica en kloktijden.</p>
+        {/if}
         {#if active}<p class="muted small">Maak je ronde eerst af om iets anders te kiezen.</p>{:else if eligible.length === 0}<p class="muted">Er zijn nog geen gecontroleerde woorden voor deze keuze. Vraag een ouder om woorden toe te voegen of te controleren.</p>{:else}<p class="practice-note"><span aria-hidden="true">✦</span> {#if due > 0}{due} {due === 1 ? 'woordenpaar' : 'woordenparen'} klaar om te herhalen.{:else if newCount > 0}Tijd om nieuwe woorden te ontdekken.{:else}Alles is bijgewerkt. Je mag natuurlijk extra oefenen.{/if}</p>{/if}
         <a class:disabled={busy || (!active && eligible.length === 0)} aria-disabled={busy || (!active && eligible.length === 0)} tabindex={busy || (!active && eligible.length === 0) ? -1 : undefined} class="button primary wide" href={resolve('play/')}>{active ? 'Verder oefenen' : 'Oefenen'} <span aria-hidden="true">→</span></a>
         <p class="privacy-note">Je voortgang wordt op dit apparaat bewaard.</p>
@@ -72,3 +82,10 @@
     <div class="home-footer"><span>Groeien gaat stap voor stap.</span><span>Geen haast, geen tijdklok.</span></div>
   </main>
 </div>
+
+<style>
+  .field-grid label { min-width: 0; }
+  @media (max-width: 620px) {
+    .course-fields { grid-template-columns: 1fr; }
+  }
+</style>

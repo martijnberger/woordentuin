@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
   import type { Language, PracticeLanguage, Snapshot, TargetLanguage, Word } from '#lib/model.ts';
-  import { LANGUAGES, PRACTICE_MODES, buildPracticeStats, progressKey } from '#lib/learning/index.ts';
+  import { LANGUAGES, PRACTICE_MODES, buildPracticeStats, inPracticeSet, practiceChapters, progressKey } from '#lib/learning/index.ts';
   import type { PairStats } from '#lib/learning/index.ts';
   import { MVT_WORD_IDS } from '#lib/content/words.ts';
   import { exportBackup, importBackup, loadSnapshot, resetProgress, saveSettings, saveWords } from '#lib/storage/index.ts';
@@ -25,12 +25,12 @@
   const normalize = (value: string) => value.trim().replace(/\s+/g, ' ');
   const compare = (value: string) => normalize(value).toLocaleLowerCase();
   const makeId = () => crypto.randomUUID();
-  $: chapters = snapshot ? [...new Set(snapshot.words.map((word) => word.chapter))].sort((a, b) => a.localeCompare(b, 'nl')) : [];
-  $: visible = snapshot ? snapshot.words.filter((word) => (chapter === 'all' || word.chapter === chapter) && (language !== 'mvt' || MVT_WORD_IDS.has(word.id))) : [];
+  $: chapters = snapshot ? practiceChapters(snapshot.words, language) : [];
+  $: visible = snapshot ? snapshot.words.filter((word) => (chapter === 'all' || word.chapter === chapter) && inPracticeSet(word, language)) : [];
   $: practiceStats = snapshot ? buildPracticeStats(snapshot.words, snapshot.progress, snapshot.exposures, { ...snapshot.settings, language, chapter }) : [];
   $: weakWords = practiceStats.filter((item) => item.label === 'Extra oefenen' || (item.dueAt !== null && item.dueAt <= Date.now()));
-  $: pairLanguage = language === 'mvt' ? addLanguage : language;
-  $: preview = makePreview(pasted, snapshot?.words ?? [], pairLanguage);
+  $: pairLanguage = language === 'mvt' ? addLanguage : language === 'fr-3vwo' ? 'fr' : language;
+  $: preview = makePreview(pasted, snapshot?.words.filter((word) => inPracticeSet(word, pairLanguage)) ?? [], pairLanguage);
 
   function makePreview(input: string, words: Word[], target: TargetLanguage) {
     const rows = input.split(/\r?\n/).map((line, index) => ({ line, number: index + 1 })).filter(({ line }) => line.trim()).map(({ line, number }) => {
@@ -62,9 +62,12 @@
     finally { busy = false; }
   }
   onMount(() => { void perform(async () => { snapshot = await loadSnapshot(); language = snapshot.settings.language; chapter = snapshot.settings.chapter; }); });
-  async function updateSettings() {
+  async function updateSettings(nextLanguage: PracticeLanguage, nextChapter: string) {
     if (!snapshot) return;
     const previous = snapshot.settings;
+    if (nextLanguage !== language && !practiceChapters(snapshot.words, nextLanguage).includes(nextChapter)) nextChapter = 'all';
+    language = nextLanguage;
+    chapter = nextChapter;
     await perform(async () => { try { await saveSettings({ ...previous, language, chapter }); snapshot = await loadSnapshot(); notice = 'Keuze opgeslagen op dit apparaat.'; } catch (cause) { language = previous.language; chapter = previous.chapter; throw cause; } });
   }
   function edit(word: Word) { editId = word.id; draft = structuredClone(word); }
@@ -94,7 +97,7 @@
     const targetChapter = normalize(newChapter || (chapter === 'all' ? '' : chapter));
     if (!targetChapter) { error = 'Vul eerst een hoofdstuk in.'; return; }
     const rows = pairs.map((pair) => `${pair.nl}\t${pair.translation}`).join('\n');
-    const result = makePreview(rows, snapshot.words, pairLanguage);
+    const result = makePreview(rows, snapshot.words.filter((word) => inPracticeSet(word, pairLanguage)), pairLanguage);
     if (!result.length || result.some((row) => row.issues.length)) { error = result.flatMap((row) => row.issues).join(' ') || 'Vul beide woorden in.'; return; }
     const added: Word[] = result.map((row) => ({ id: makeId(), chapter: targetChapter, partOfSpeech: 'other', forms: { nl: row.nl, [pairLanguage]: row.translation }, revision: 1, reviewed: false, enabled: true }));
     await perform(async () => { snapshot = await saveWords([...snapshot!.words, ...added]); newDutch = ''; newTarget = ''; pasted = ''; notice = `${added.length} ${added.length === 1 ? 'woordenpaar' : 'woordenparen'} toegevoegd. Controleer en markeer als nagekeken voordat je ermee speelt.`; });
@@ -139,7 +142,13 @@
     {#if error}<div class="message error" role="alert">{error}</div>{/if}
     {#if notice}<div class="message" role="status">{notice}</div>{/if}
     {#if snapshot}
-      <section class="panel filters" aria-labelledby="filter-title"><div><p class="eyebrow">Samen kiezen</p><h2 id="filter-title">Taal en hoofdstuk</h2><p>Deze keuze geldt ook voor het spelen.</p></div><div class="filter-fields"><label>Taal<select bind:value={language} on:change={updateSettings} disabled={busy}>{#each Object.entries(PRACTICE_MODES) as [key, label]}<option value={key}>{label}</option>{/each}</select></label><label>Hoofdstuk<select bind:value={chapter} on:change={updateSettings} disabled={busy}><option value="all">Alle hoofdstukken</option>{#each chapters as item}<option value={item}>{item}</option>{/each}</select></label></div></section>
+      <section class="panel filters" aria-labelledby="filter-title">
+        <div><p class="eyebrow">Samen kiezen</p><h2 id="filter-title">Taal en hoofdstuk</h2><p>Deze keuze geldt ook voor het spelen.</p></div>
+        <div class="filter-fields">
+          <label>Taal<select value={language} on:change={(event) => updateSettings(event.currentTarget.value as PracticeLanguage, chapter)} disabled={busy}>{#each Object.entries(PRACTICE_MODES) as [key, label]}<option value={key}>{label}</option>{/each}</select></label>
+          <label>{language === 'fr-3vwo' ? 'Onderdeel' : 'Hoofdstuk'}<select value={chapter} on:change={(event) => updateSettings(language, event.currentTarget.value)} disabled={busy}><option value="all">{language === 'fr-3vwo' ? 'Alle onderdelen' : 'Alle hoofdstukken'}</option>{#each chapters as item}<option value={item}>{item}</option>{/each}</select></label>
+        </div>
+      </section>
       <section class="panel" aria-labelledby="attention-title"><div class="heading"><div><p class="eyebrow">Oefenen helpt</p><h2 id="attention-title">Woorden om nog eens te bekijken</h2></div><span class="count">{weakWords.length}</span></div><p>Herkenning: recente fouten of hulp, of een geplande herhaling. Dit is geen cijfer.</p>{#if weakWords.length}<ul class="weak-list">{#each weakWords as item}<li><strong lang="nl">{item.word.forms.nl}</strong><span lang={item.language}>{item.word.forms[item.language]}</span><small>{LANGUAGES[item.language]} · {item.label} · recent {item.mistakes} fout · {item.hints}× hulp · {item.reason}</small></li>{/each}</ul>{:else}<p class="empty">Nog geen woorden die extra aandacht vragen voor deze keuze.</p>{/if}</section>
       <section class="panel" aria-labelledby="stats-title">
         <h2 id="stats-title">Herkenning tijdens het verbinden</h2>
@@ -175,11 +184,13 @@
       <section class="panel" aria-labelledby="words-title"><div class="heading"><div><p class="eyebrow">De woordenlijst</p><h2 id="words-title">{language === 'mvt' ? 'MVT-woorden beheren' : 'Woorden beheren'}</h2></div><span class="count">{visible.length}</span></div><p>{language === 'mvt' ? 'Alleen actieve, voor oefenen vrijgegeven woorden komen in een spel. Vrijgegeven betekent niet taalkundig gecontroleerd.' : 'Alleen actieve én nagekeken woorden komen in een spel. Nieuwe woorden moet je zelf nakijken.'}</p>{#if language === 'mvt'}<p>Nederlands is de basis. Kies alle hoofdstukken om alle boekwoorden te beheren.</p>{/if}
         {#each visible as word (word.id)}<article class="word-row">
           {#if editId === word.id && draft}<div class="edit-form"><label>Hoofdstuk<input bind:value={draft.chapter} /></label><label>Nederlands<input bind:value={draft.forms.nl} /></label>{#each languageKeys as key}<label>{LANGUAGES[key]}<input value={draft.forms[key] ?? ''} on:input={(event) => { if (draft) draft.forms[key] = event.currentTarget.value; }} /></label>{/each}<label>Woordsoort<select bind:value={draft.partOfSpeech}><option value="other">Overig</option><option value="noun">Zelfstandig naamwoord</option><option value="verb">Werkwoord</option><option value="adjective">Bijvoeglijk naamwoord</option></select></label><label>Context<input bind:value={draft.context} /></label><label>Notitie<input bind:value={draft.note} /></label><div class="actions"><button class="primary" on:click={commitDraft} disabled={busy}>Bewaren</button><button on:click={() => { editId = null; draft = null; }}>Annuleren</button></div></div>
-          {:else}<div class="word-main"><div><strong lang="nl">{word.forms.nl || 'Nederlands ontbreekt'}</strong>{#if language === 'mvt'}<dl class="book-forms">{#each languageKeys as key}<div><dt>{LANGUAGES[key]}</dt><dd lang={key}>{word.forms[key] || '—'}</dd></div>{/each}</dl>{#if word.note}<p class="book-note">{word.note}</p>{/if}{:else}<span class="translation" lang={language}>{word.forms[language] || 'Vertaling ontbreekt'}</span>{/if}<small>{word.chapter}{#if language !== 'mvt'} · {status(word, language)}{/if}</small></div><div class="word-actions"><button on:click={() => edit(word)} disabled={busy}>Bewerken</button><button aria-pressed={word.enabled} on:click={() => toggle(word, 'enabled')} disabled={busy}>{word.enabled ? 'Actief' : 'Inactief'}</button><button aria-pressed={word.reviewed} on:click={() => toggle(word, 'reviewed')} disabled={busy}>{language === 'mvt' ? (word.reviewed ? 'Vrijgegeven voor oefenen' : 'Niet vrijgegeven') : (word.reviewed ? 'Nagekeken' : 'Nog nakijken')}</button></div></div>{/if}
-          {#each language === 'mvt' ? languageKeys.filter((key) => key !== 'en' && !!word.forms[key]) : [language] as target}{#if snapshot.progress[progressKey(word.id, target, 'recall')]}<p class="recall">{language === 'mvt' ? `${LANGUAGES[target]} · ` : ''}Historisch archief, zelf gemeld (geen toets): {snapshot.progress[progressKey(word.id, target, 'recall')].successes}× geweten · {snapshot.progress[progressKey(word.id, target, 'recall')].mistakes}× nog oefenen. Er worden geen nieuwe zelfbeoordelingen gevraagd.</p>{/if}{/each}
+          {:else}<div class="word-main"><div><strong lang="nl">{word.forms.nl || 'Nederlands ontbreekt'}</strong>{#if language === 'mvt'}<dl class="book-forms">{#each languageKeys as key}<div><dt>{LANGUAGES[key]}</dt><dd lang={key}>{word.forms[key] || '—'}</dd></div>{/each}</dl>{#if word.note}<p class="book-note">{word.note}</p>{/if}{:else}<span class="translation" lang={pairLanguage}>{word.forms[pairLanguage] || 'Vertaling ontbreekt'}</span>{/if}<small>{word.chapter}{#if language !== 'mvt'} · {status(word, pairLanguage)}{/if}</small></div><div class="word-actions"><button on:click={() => edit(word)} disabled={busy}>Bewerken</button><button aria-pressed={word.enabled} on:click={() => toggle(word, 'enabled')} disabled={busy}>{word.enabled ? 'Actief' : 'Inactief'}</button><button aria-pressed={word.reviewed} on:click={() => toggle(word, 'reviewed')} disabled={busy}>{language === 'mvt' ? (word.reviewed ? 'Vrijgegeven voor oefenen' : 'Niet vrijgegeven') : (word.reviewed ? 'Nagekeken' : 'Nog nakijken')}</button></div></div>{/if}
+          {#each language === 'mvt' ? languageKeys.filter((key) => key !== 'en' && !!word.forms[key]) : [pairLanguage] as target}{#if snapshot.progress[progressKey(word.id, target, 'recall')]}<p class="recall">{language === 'mvt' ? `${LANGUAGES[target]} · ` : ''}Historisch archief, zelf gemeld (geen toets): {snapshot.progress[progressKey(word.id, target, 'recall')].successes}× geweten · {snapshot.progress[progressKey(word.id, target, 'recall')].mistakes}× nog oefenen. Er worden geen nieuwe zelfbeoordelingen gevraagd.</p>{/if}{/each}
         </article>{:else}<p class="empty">Geen woorden voor deze taal en dit hoofdstuk.</p>{/each}
       </section>
+      {#if language !== 'fr-3vwo'}
       <section class="panel" aria-labelledby="add-title"><p class="eyebrow">Een eigen lijst</p><h2 id="add-title">Woorden toevoegen</h2><p>Voeg een paar toe of plak twee kolommen uit een spreadsheet: Nederlands en daarna de vertaling, met een tab ertussen. Eigen woorden verschijnen in de afzonderlijke taal, niet in het MVT-boek.</p>{#if language === 'mvt'}<label>Doeltaal voor nieuwe woorden<select bind:value={addLanguage}>{#each languageKeys as key}<option value={key}>{LANGUAGES[key]}</option>{/each}</select></label>{/if}<label>Hoofdstuk voor nieuwe woorden<input bind:value={newChapter} placeholder={chapter === 'all' ? 'Bijvoorbeeld hoofdstuk 1' : chapter} /></label><div class="pair-fields"><label>Nederlands<input bind:value={newDutch} /></label><label>{LANGUAGES[pairLanguage]}<input bind:value={newTarget} /></label></div><button class="primary" disabled={busy} on:click={() => addPairs([{ nl: newDutch, translation: newTarget }])}>Woordenpaar toevoegen</button><div class="import"><label>Plak je lijst<textarea bind:value={pasted} rows="5" placeholder={'huis\tHaus\nboom\tBaum'}></textarea></label>{#if preview.length}<h3>Voorbeeld · {preview.length} regels</h3><ul class="preview">{#each preview as row}<li><strong>Regel {row.line}:</strong> {row.nl || 'ontbreekt'} → {row.translation || 'ontbreekt'}{#each row.issues as issue}<span class="issue">{issue}</span>{/each}</li>{/each}</ul><button class="primary" disabled={busy || preview.some((row) => row.issues.length > 0)} on:click={() => addPairs(preview)}>Lijst toevoegen</button>{/if}</div></section>
+      {/if}
       <section class="panel backup" aria-labelledby="backup-title"><p class="eyebrow">Goed om te bewaren</p><h2 id="backup-title">Reservekopie &amp; voortgang</h2><p>Bewaar af en toe een reservekopie buiten deze browser. Terugzetten vervangt de gegevens op dit apparaat. Oefenvoortgang wissen laat je woorden staan.</p><div class="actions"><button on:click={download} disabled={busy}>Reservekopie downloaden</button><button on:click={() => backupFile.click()} disabled={busy}>Reservekopie terugzetten</button><input class="file" bind:this={backupFile} type="file" accept="application/json,.json" on:change={restore} /><button class="danger" on:click={reset} disabled={busy}>Voortgang wissen</button></div></section>
     {:else if !error}<p>Gegevens laden…</p>{/if}
   </main>

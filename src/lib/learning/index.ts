@@ -1,12 +1,13 @@
 import type { Board, Exposure, Language, MatchEvidence, PracticeLanguage, Progress, Session, Settings, TargetLanguage, Word } from '../model';
 import { MATCH_PAIRS } from '../model';
 import { MVT_WORD_IDS } from '../content/words';
+import { FRENCH_3VWO_WORD_IDS } from '../content/french-3vwo';
 import { cleanSuccess, pairKey, recentAppearances, summarizePairs, validDuration } from './stats';
 import type { PairStats } from './stats';
 export type { PairStats } from './stats';
 
 export const LANGUAGES: Record<TargetLanguage, string> = { de: 'Duits', fr: 'Frans', es: 'Spaans', en: 'Engels' };
-export const PRACTICE_MODES: Record<PracticeLanguage, string> = { ...LANGUAGES, mvt: 'MVT · Frans, Duits en Spaans' };
+export const PRACTICE_MODES: Record<PracticeLanguage, string> = { ...LANGUAGES, 'fr-3vwo': 'Frans · 3 VWO', mvt: 'MVT · Frans, Duits en Spaans' };
 const targets: TargetLanguage[] = ['fr', 'de', 'es'];
 export interface MatchTiming { selectionMs: number | null; responseMs: number | null }
 export type Action = { type: 'begin' } | { type: 'select'; side: 'left' | 'right'; wordId: string; timing?: MatchTiming } | { type: 'hint'; timing?: MatchTiming } | { type: 'next-board' };
@@ -22,9 +23,19 @@ let idCounter = 0;
 function uniqueId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${(++idCounter).toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
+export function inPracticeSet(word: Word, language: PracticeLanguage): boolean {
+  if (language === 'mvt') return MVT_WORD_IDS.has(word.id);
+  return FRENCH_3VWO_WORD_IDS.has(word.id) === (language === 'fr-3vwo');
+}
+export function practiceChapters(words: Word[], language: PracticeLanguage): string[] {
+  return [...new Set(words.filter((word) => inPracticeSet(word, language)).map((word) => word.chapter))]
+    .sort((a, b) => a.localeCompare(b, 'nl', { numeric: true }));
+}
 export function targetLanguages(word: Word, settings: Settings): TargetLanguage[] {
-  if (settings.language === 'mvt') return MVT_WORD_IDS.has(word.id) ? targets.filter((language) => !!word.forms[language]?.trim()) : [];
-  return word.forms[settings.language]?.trim() ? [settings.language] : [];
+  if (!inPracticeSet(word, settings.language)) return [];
+  if (settings.language === 'mvt') return targets.filter((language) => !!word.forms[language]?.trim());
+  const target = settings.language === 'fr-3vwo' ? 'fr' : settings.language;
+  return word.forms[target]?.trim() ? [target] : [];
 }
 export function eligibleWords(words: Word[], settings: Settings): Word[] {
   return words.filter((w) => w.enabled && w.reviewed && (settings.chapter === 'all' || settings.chapter === w.chapter) && !!w.forms.nl?.trim() && targetLanguages(w, settings).length > 0);

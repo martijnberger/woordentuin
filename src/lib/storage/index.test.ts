@@ -1,8 +1,9 @@
 import 'fake-indexeddb/auto';
 import { deleteDB, openDB } from 'idb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSession, progressKey, transition } from '../learning';
+import { createSession, eligibleWords, progressKey, transition } from '../learning';
 import { legacySeedWords, MVT_WORD_IDS, seedWords } from '../content/words';
+import { french3VwoWords } from '../content/french-3vwo';
 import type { Exposure, Session, Word } from '../model';
 import { acquirePlayLock, clearSession, exportBackup, importBackup, loadSnapshot, resetProgress, saveSession, saveSettings, saveWords } from './index';
 
@@ -27,6 +28,19 @@ describe('lokale opslag', () => {
     const first = await loadSnapshot();
     await saveSettings({ ...first.settings, language: 'fr' });
     expect((await loadSnapshot()).settings.language).toBe('fr');
+  });
+  it('adds 3 VWO to a version 3 backup without changing an active regular French round', async () => {
+    const french: Word = { ...word, forms: { nl: 'huis', fr: 'la maison' } };
+    const initial = await loadSnapshot();
+    const settings = { ...initial.settings, language: 'fr' as const };
+    const session = createSession([french], {}, settings, [], 1000, () => 0.5);
+    const v3 = { ...initial, schemaVersion: 3, words: [french], settings, session };
+    const restored = await importBackup(JSON.stringify(v3));
+    expect(restored.session).toEqual(session);
+    expect(eligibleWords(restored.words, settings)).toEqual([french]);
+    expect(eligibleWords(restored.words, { ...settings, language: 'fr-3vwo', chapter: 'Apprendre 10 · Kloktijden' }))
+      .toContainEqual(expect.objectContaining({ forms: { nl: 'Het is half zes.', fr: 'Il est cinq heures et demie.' } }));
+    expect(await loadSnapshot()).toEqual(restored);
   });
   it('commits events and session atomically, rejects stale versions and never double counts event IDs', async () => {
     const initial = await loadSnapshot();
@@ -124,8 +138,8 @@ describe('lokale opslag', () => {
     await database.put('state', legacy, 'snapshot');
     database.close();
     const migrated = await loadSnapshot();
-    expect(migrated.schemaVersion).toBe(3);
-    expect(migrated.words).toHaveLength(3);
+    expect(migrated.schemaVersion).toBe(4);
+    expect(migrated.words).toHaveLength(3 + french3VwoWords.length);
     expect(migrated.words.find((item) => item.id === revised.id)).toEqual(seedWords.find((item) => item.id === revised.id));
     expect(migrated.words.find((item) => item.id === edited.id)).toEqual(edited);
     expect(migrated.progress[key]).toEqual(progress);
@@ -186,8 +200,8 @@ describe('lokale opslag', () => {
     await database.put('state', legacy, 'snapshot');
     database.close();
     const migrated = await loadSnapshot();
-    expect(migrated.schemaVersion).toBe(3);
-    expect(migrated.words).toEqual([english]);
+    expect(migrated.schemaVersion).toBe(4);
+    expect(migrated.words).toEqual([english, ...french3VwoWords]);
     expect(migrated.progress).toEqual(legacy.progress);
     expect(migrated.exposures).toEqual(exposures.map((event) => ({ ...event, context: null })));
     expect(migrated.session).toBeNull();
