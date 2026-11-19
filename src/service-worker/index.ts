@@ -6,6 +6,8 @@ import { resolve } from '$app/paths';
 const prefix = 'woordentuin-precache-';
 const cacheName = `${prefix}${version}`;
 const files = [...new Set([...assets, ...immutable, ...prerendered].map(({ path }) => resolve(path)))];
+const scope = new URL(worker.registration.scope);
+const immutablePath = `${scope.pathname}_app/immutable/`;
 
 worker.addEventListener('install', (event) => {
   event.waitUntil((async () => {
@@ -16,8 +18,13 @@ worker.addEventListener('install', (event) => {
 
 worker.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
-    for (const name of await caches.keys()) {
-      if (name.startsWith(prefix) && name !== cacheName) await caches.delete(name);
+    const clients = await worker.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    // Open tabs may still import modules from their original build after the takeover.
+    if (!clients.some((client) => client.url.startsWith(scope.href))) {
+      const names = await caches.keys();
+      for (const name of names.slice(0, names.indexOf(cacheName))) {
+        if (name.startsWith(prefix)) await caches.delete(name);
+      }
     }
     await worker.clients.claim();
   })());
@@ -34,14 +41,8 @@ worker.addEventListener('message', (event) => {
   }
   if (event.data?.type !== 'ACTIVATE_UPDATE') return;
   event.waitUntil((async () => {
-    const clients = await worker.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    const sourceId = event.source && 'id' in event.source ? event.source.id : undefined;
-    if (clients.some((client) => client.id !== sourceId)) {
-      event.ports[0]?.postMessage({ ok: false });
-      return;
-    }
-    event.ports[0]?.postMessage({ ok: true });
     await worker.skipWaiting();
+    event.ports[0]?.postMessage({ ok: true });
   })());
 });
 
@@ -51,6 +52,13 @@ worker.addEventListener('fetch', (event) => {
     const cache = await caches.open(cacheName);
     const url = new URL(event.request.url);
     const cached = await cache.match(url.pathname) ?? (event.request.mode === 'navigate' && !url.pathname.endsWith('/') ? await cache.match(`${url.pathname}/`) : undefined);
+    if (!cached && url.pathname.startsWith(immutablePath)) {
+      for (const name of await caches.keys()) {
+        if (!name.startsWith(prefix) || name === cacheName) continue;
+        const previous = await caches.match(url.pathname, { cacheName: name });
+        if (previous) return previous;
+      }
+    }
     return cached ?? fetch(event.request);
   })());
 });

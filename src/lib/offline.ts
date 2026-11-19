@@ -21,11 +21,15 @@ export function initializeOffline(onStatus: (status: OfflineStatus) => void): ()
   const emit = () => { if (!stopped) onStatus({ ready, updateAvailable: !!registration?.waiting && !!navigator.serviceWorker?.controller, online: navigator.onLine }); };
   const refresh = async () => {
     const controller = navigator.serviceWorker?.controller;
-    ready = false;
-    if (controller) {
-      try { ready = (await ask(controller, 'CHECK_READY')).ready === true; } catch { ready = false; }
-    }
     emit();
+    let cached = false;
+    if (controller) {
+      try { cached = (await ask(controller, 'CHECK_READY')).ready === true; } catch { /* Not ready. */ }
+    }
+    if (controller === navigator.serviceWorker?.controller) {
+      ready = cached;
+      emit();
+    }
   };
   const stateChange = () => { void refresh(); };
   const watch = () => {
@@ -62,10 +66,21 @@ export async function activateUpdate(): Promise<void> {
   const waiting = registration?.waiting;
   if (!waiting) throw new Error('Er staat geen update klaar.');
   const result = await ask(waiting, 'ACTIVATE_UPDATE');
-  if (!result.ok) throw new Error('Sluit eerst de andere tabbladen van Woordentuin en probeer opnieuw.');
-  await new Promise<void>((resolve) => {
-    if (navigator.serviceWorker.controller === waiting) return resolve();
-    navigator.serviceWorker.addEventListener('controllerchange', () => resolve(), { once: true });
+  if (!result.ok) throw new Error('De offline service kon de update niet starten. Vernieuw de pagina en probeer opnieuw.');
+  const serviceWorker = navigator.serviceWorker;
+  await new Promise<void>((resolve, reject) => {
+    if (serviceWorker.controller === waiting) return resolve();
+    const timeout = window.setTimeout(() => {
+      serviceWorker.removeEventListener('controllerchange', onChange);
+      reject(new Error('De nieuwe versie kon niet worden geladen. Vernieuw de pagina en probeer opnieuw.'));
+    }, 10_000);
+    function onChange() {
+      if (serviceWorker.controller !== waiting) return;
+      clearTimeout(timeout);
+      serviceWorker.removeEventListener('controllerchange', onChange);
+      resolve();
+    }
+    serviceWorker.addEventListener('controllerchange', onChange);
   });
   window.location.reload();
 }
